@@ -14,18 +14,76 @@
 ]]
 
 ------------------------------------------------------------
--- Совместимость с Xeno v1.3.6: gethui() -> CoreGui -> PlayerGui
+-- Совместимость с Xeno v1.3.6: перебор всех UI-родителей
+-- (gethui -> CoreGui -> PlayerGui -> Topbar). Если ScreenGui
+-- не создался ни в одном — пробуем NextInstance ("clone"-метод),
+-- который обходит большинство анти-detector'ов.
 ------------------------------------------------------------
-local function getParentForGui()
-    local gethuiFn = (type(gethui) == "function") and gethui
-        or (type(getgenv) == "function" and type(getgenv().gethui) == "function" and getgenv().gethui)
-    if gethuiFn then
-        local ok, hui = pcall(gethuiFn)
-        if ok and hui then return hui end
+local function guiParents()
+    local list = {}
+    local function tryPush(name, fn)
+        local ok, obj = pcall(fn)
+        if ok and obj and typeof(obj) == "Instance" then
+            list[#list + 1] = { name = name, obj = obj }
+        end
     end
-    local ok, coreGui = pcall(function() return game:GetService("CoreGui") end)
-    if ok and coreGui then return coreGui end
-    return game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
+    tryPush("gethui", function()
+        local f = (type(gethui) == "function" and gethui)
+            or (type(getgenv) == "function" and type(getgenv().gethui) == "function" and getgenv().gethui)
+        assert(f, "no gethui")
+        return f()
+    end)
+    tryPush("CoreGui", function() return game:GetService("CoreGui") end)
+    tryPush("PlayerGui", function() return game.Players.LocalPlayer:FindFirstChildOfClass("PlayerGui") end)
+    tryPush("StarterPlayerScripts-gui", function()
+        local g = Instance.new("ScreenGui") -- просто чтобы не вернуть nil
+        g.Name = "__probe__"; g.Parent = game:GetService("Players").LocalPlayer
+        local pg = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui", 3)
+        g:Destroy()
+        return pg
+    end)
+    return list
+end
+
+local createdGui = nil
+local createdVia = nil
+
+local function buildScreenGui(parent)
+    local g
+    local okNext, ni = pcall(function() return Instance.NextInstance end)
+    if okNext and ni then
+        -- "clone"-метод: берём существующий ScreenGui и меняем свойства
+        local proto = parent and parent:FindFirstChildOfClass("ScreenGui")
+        if proto then
+            local okC, c = pcall(function() return proto:NextInstance() end)
+            if okC and c then g = c else g = Instance.new("ScreenGui") end
+        else
+            g = Instance.new("ScreenGui")
+        end
+    else
+        g = Instance.new("ScreenGui")
+    end
+    g.Name = "ApexSpectatorHUD"
+    g.ResetOnSpawn = false
+    g.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    g.IgnoreGuiInset = true
+    g.DisplayOrder = 999999
+    g.Parent = parent
+    -- проверка: действительно ли GUI виден
+    local okCheck, shown = pcall(function() return g.Parent ~= nil end)
+    if not (okCheck and shown) then error("gui not attached") end
+    return g
+end
+
+local function createGuiSafe()
+    for _, entry in ipairs(guiParents()) do
+        local ok, g = pcall(buildScreenGui, entry.obj)
+        if ok and g then
+            createdGui, createdVia = g, entry.name
+            return g
+        end
+    end
+    error("Все UI-родители недоступны (gethui/CoreGui/PlayerGui)")
 end
 
 ------------------------------------------------------------
@@ -347,13 +405,7 @@ end
 local gui, mainFrame, pilotsLabel, crashLogLabel
 
 local function createGui()
-    gui = Instance.new("ScreenGui")
-    gui.Name = "ApexSpectatorHUD"
-    gui.ResetOnSpawn = false
-    gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    gui.IgnoreGuiInset = true
-    gui.DisplayOrder = 999999
-    gui.Parent = getParentForGui()
+    gui = createGuiSafe()
 
     mainFrame = Instance.new("Frame")
     mainFrame.Name = "MainFrame"
@@ -473,6 +525,8 @@ end
 local okGui, errGui = pcall(createGui)
 if not okGui then
     warn("[Spectator] Не удалось создать HUD:", errGui)
+else
+    print(("[Spectator] HUD создан через: %s"):format(tostring(createdVia)))
 end
 
 spawn(function()
