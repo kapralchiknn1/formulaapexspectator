@@ -30,7 +30,7 @@ loadstring(game:HttpGet("https://raw.githubusercontent.com/kapralchiknn1/formula
 
 Готовый лоадер также лежит в файле [`loader.lua`](./loader.lua).
 
-## Ручная установка (Xeno v1.3.6 / v1.6)
+## Ручная установка (Xeno v1.3.6)
 1. Запустите Roblox и зайдите на сервер Formula Apex.
 2. Откройте **Xeno** и сделайте **Inject/Attach** к процессу Roblox.
 3. Скопируйте содержимое файла [`main.lua`](./main.lua) в редактор скриптов Xeno.
