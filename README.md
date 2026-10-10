@@ -11,6 +11,15 @@
 - Кнопка скрытия/показа интерфейса.
 
 ## Быстрый запуск (loadstring) — рекомендуется
+
+### Вариант 1: через лоадер (лучше всего)
+Лоадер сам скачает актуальный скрипт, покажет уведомления в Xeno и предупредит, если вы не в Formula Apex:
+
+```lua
+loadstring(game:HttpGet("https://raw.githubusercontent.com/kapralchiknn1/formulaapexspectator/main/loader.lua"))()
+```
+
+### Вариант 2: напрямую main.lua
 Вставьте эту строку в Xeno и нажмите **Execute** (скрипт всегда подтягивается с GitHub, обновлять не нужно):
 
 ```lua
