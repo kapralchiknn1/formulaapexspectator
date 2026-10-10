@@ -16,13 +16,21 @@
 ]]
 
 ------------------------------------------------------------
--- Безопасное получение сервисов (workaround для некоторых инжекторов)
+-- Совместимость с Xeno v1.6: gethui() вместо CoreGui (обходит защиту)
 ------------------------------------------------------------
+local function getParentForGui()
+    local ok, hui = pcall(gethui)
+    if ok and hui then return hui end
+    ok = pcall(function() return getgenv().gethui() end)
+    if ok then return getgenv().gethui() end
+    ok, hui = pcall(function() return game:GetService("CoreGui") end)
+    if ok then return hui end
+    return game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
+end
+
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local StarterPlayer = game:GetService("StarterPlayer")
-local TweenService = game:GetService("TweenService")
 local HttpService = game:GetService("HttpService")
 
 local LocalPlayer = Players.LocalPlayer
@@ -219,7 +227,7 @@ local function createGui()
     gui.Name = "ApexSpectatorHUD"
     gui.ResetOnSpawn = false
     gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    gui.Parent = game:GetService("CoreGui") -- Xeno позволяет это делать
+    gui.Parent = getParentForGui() -- gethui() для Xeno v1.6
 
     mainFrame = Instance.new("Frame")
     mainFrame.Name = "MainFrame"
