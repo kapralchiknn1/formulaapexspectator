@@ -423,8 +423,10 @@ end
 -- GUI (HUD)
 ------------------------------------------------------------
 local gui, mainFrame, pilotsLabel, crashLogLabel, hideBtn, collapsed = nil, nil, nil, nil, nil, false
-local pinBtn, clearBtn, helpBtn, ghostBtn = nil, nil, nil, nil
-local pinned, ghostMode = false, false
+local pinBtn, clearBtn, helpBtn, ghostBtn, alphaBtn = nil, nil, nil, nil, nil
+local pinned = false
+-- Прозрачность HUD: normal (обычный) / ghost (P — чуть прозрачнее обычного) / alpha (A — сильно прозрачный)
+local hudAlpha = "normal"
 local helpWindow, helpVisible = nil, false
 local HEADER_H = 40 -- высота шапки HUD (с кнопками)
 local startBtn = nil
@@ -539,11 +541,12 @@ buildGuiContents = function()
 
     titleLbl = Instance.new("TextLabel")
     titleLbl.Name = "Title"
-    titleLbl.Size = UDim2.new(1, -160, 0, 40)
-    titleLbl.Position = UDim2.new(0, 16, 0, 0)
+    -- Размер/шрифт уменьшены, чтобы все кнопки шапки помещались рядом с заголовком
+    titleLbl.Size = UDim2.new(1, -215, 0, 40)
+    titleLbl.Position = UDim2.new(0, 12, 0, 0)
     titleLbl.BackgroundTransparency = 1
     titleLbl.Font = Enum.Font.GothamBold
-    titleLbl.TextSize = 20
+    titleLbl.TextSize = 15
     titleLbl.TextColor3 = Color3.fromRGB(255, 70, 70)
     titleLbl.TextXAlignment = Enum.TextXAlignment.Left
     titleLbl.Text = "FORMULA APEX | SPECTATOR"
@@ -563,8 +566,8 @@ buildGuiContents = function()
     hideBtn.Parent = mainFrame
     Instance.new("UICorner", hideBtn).CornerRadius = UDim.new(0, 8)
 
-    -- Кнопка «призрачного» режима: HUD становится сильно прозрачным
-    -- (фон и текст полупрозрачные), но окно остаётся на месте и кликается.
+    -- Кнопка «P» — лёгкая прозрачность: HUD становится чуть прозрачнее
+    -- обычного режима (фон и текст полупрозрачные), окно остаётся на месте.
     ghostBtn = Instance.new("TextButton")
     ghostBtn.Name = "GhostToggle"
     ghostBtn.Size = UDim2.new(0, 30, 0, 30)
@@ -573,48 +576,68 @@ buildGuiContents = function()
     ghostBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
     ghostBtn.Font = Enum.Font.GothamBold
     ghostBtn.TextSize = 16
-    ghostBtn.Text = "G"
+    ghostBtn.Text = "P"
     ghostBtn.AutoButtonColor = true
     ghostBtn.Parent = mainFrame
     Instance.new("UICorner", ghostBtn).CornerRadius = UDim.new(0, 8)
 
-    local function applyGhostMode()
-        if ghostMode then
-            mainFrame.BackgroundTransparency = 0.75
-            for _, lbl in ipairs({ titleLbl, pilotsLabel, crashLogLabel }) do
-                if lbl then pcall(function() lbl.TextTransparency = 0.6 end) end
-            end
-            local lt = mainFrame:FindFirstChild("LogTitle")
-            if lt then pcall(function() lt.TextTransparency = 0.6 end) end
-            local strokeInst = mainFrame:FindFirstChild("Border")
-            if strokeInst then pcall(function() strokeInst.Transparency = 0.75 end) end
-            ghostBtn.Text = "g"
-            print("[Spectator] Призрачный режим ВКЛ: HUD сильно прозрачный.")
+    -- Кнопка «A» — сильная прозрачность (почти невидимый HUD)
+    alphaBtn = Instance.new("TextButton")
+    alphaBtn.Name = "AlphaToggle"
+    alphaBtn.Size = UDim2.new(0, 30, 0, 30)
+    alphaBtn.Position = UDim2.new(1, -176, 0, 5)
+    alphaBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+    alphaBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    alphaBtn.Font = Enum.Font.GothamBold
+    alphaBtn.TextSize = 16
+    alphaBtn.Text = "A"
+    alphaBtn.AutoButtonColor = true
+    alphaBtn.Parent = mainFrame
+    Instance.new("UICorner", alphaBtn).CornerRadius = UDim.new(0, 8)
+
+    -- Применение текущего уровня прозрачности HUD.
+    -- normal — обычный вид; P — чуть прозрачнее обычного; A — сильно прозрачный.
+    local function applyHudAlpha()
+        if not mainFrame then return end
+        local bgT, txtT, strokeT
+        if hudAlpha == "alpha" then
+            bgT, txtT, strokeT = 0.92, 0.8, 0.9
+        elseif hudAlpha == "ghost" then
+            bgT, txtT, strokeT = 0.5, 0.4, 0.6
         else
-            mainFrame.BackgroundTransparency = pinned and 0 or 0.15
-            for _, lbl in ipairs({ titleLbl, pilotsLabel, crashLogLabel }) do
-                if lbl then pcall(function() lbl.TextTransparency = 0 end) end
-            end
-            local lt = mainFrame:FindFirstChild("LogTitle")
-            if lt then pcall(function() lt.TextTransparency = 0 end) end
-            local strokeInst = mainFrame:FindFirstChild("Border")
-            if strokeInst then pcall(function() strokeInst.Transparency = 0.4 end) end
-            ghostBtn.Text = "G"
-            print("[Spectator] Призрачный режим ВЫКЛ.")
+            bgT, txtT, strokeT = (pinned and 0 or 0.15), 0, 0.4
         end
+        pcall(function() mainFrame.BackgroundTransparency = bgT end)
+        for _, lbl in ipairs({ titleLbl, pilotsLabel, crashLogLabel }) do
+            if lbl then pcall(function() lbl.TextTransparency = txtT end) end
+        end
+        local lt = mainFrame:FindFirstChild("LogTitle")
+        if lt then pcall(function() lt.TextTransparency = txtT end) end
+        local strokeInst = mainFrame:FindFirstChild("Border")
+        if strokeInst then pcall(function() strokeInst.Transparency = strokeT end) end
+        if ghostBtn then pcall(function() ghostBtn.Text = (hudAlpha == "ghost") and "p" or "P" end) end
+        if alphaBtn then pcall(function() alphaBtn.Text = (hudAlpha == "alpha") and "a" or "A" end) end
     end
 
     ghostBtn.MouseButton1Click:Connect(function()
-        ghostMode = not ghostMode
-        local ok, err = pcall(applyGhostMode)
-        if not ok then warn("[Spectator] Ghost mode error:", err) end
+        hudAlpha = (hudAlpha == "ghost") and "normal" or "ghost"
+        local ok, err = pcall(applyHudAlpha)
+        if not ok then warn("[Spectator] Alpha mode error:", err) end
+        print("[Spectator] Прозрачность HUD:", hudAlpha)
+    end)
+
+    alphaBtn.MouseButton1Click:Connect(function()
+        hudAlpha = (hudAlpha == "alpha") and "normal" or "alpha"
+        local ok, err = pcall(applyHudAlpha)
+        if not ok then warn("[Spectator] Alpha mode error:", err) end
+        print("[Spectator] Прозрачность HUD:", hudAlpha)
     end)
 
     -- Кнопка справки "?" — содержимое окна HELP будет заполнено позже.
     helpBtn = Instance.new("TextButton")
     helpBtn.Name = "HelpBtn"
     helpBtn.Size = UDim2.new(0, 30, 0, 30)
-    helpBtn.Position = UDim2.new(1, -176, 0, 5)
+    helpBtn.Position = UDim2.new(1, -212, 0, 5)
     helpBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
     helpBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
     helpBtn.Font = Enum.Font.GothamBold
@@ -723,6 +746,11 @@ buildGuiContents = function()
             setInputPassThrough(false)
             pinBtn.Text = "P"
             print("[Spectator] HUD откреплён: окно снова перемещаемое.")
+        end
+        -- После смены пина переприменяем уровень прозрачности (P/A), если он активен,
+        -- чтобы он не «затирался» настройками пина.
+        if hudAlpha ~= "normal" then
+            pcall(applyHudAlpha)
         end
     end
 
@@ -958,8 +986,10 @@ spawn(function()
         local ok2, g = pcall(buildScreenGui, entry.obj)
         if ok2 and g then
             gui = g
-            pcall(buildGuiContents) -- пересобрать содержимое окна
-            print("[Spectator] HUD пересоздан через: " .. entry.name)
+                pcall(buildGuiContents) -- пересобрать содержимое окна
+        -- После пересборки восстанавливаем активный режим прозрачности (P/A)
+        if hudAlpha ~= "normal" then pcall(applyHudAlpha) end
+        print("[Spectator] HUD пересоздан через: " .. entry.name)
             break
         end
     end

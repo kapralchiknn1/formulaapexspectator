@@ -15,9 +15,9 @@ loadstring(game:HttpGet("https://raw.githubusercontent.com/kapralchiknn1/formula
 ------------------------------------------------------------
 
 local REPO_RAW = "https://raw.githubusercontent.com/kapralchiknn1/formulaapexspectator/main/"
-local LOADER_BUILD = "2026-10-10-4" -- обновляется вместе с main.lua
+local LOADER_BUILD = "2026-10-10-5" -- обновляется вместе с main.lua
 local SCRIPT_URL = REPO_RAW .. "main.lua?cb=" .. LOADER_BUILD .. "-" .. tostring(math.random(100000, 999999))
-local VERSION = "loader-v3"
+local VERSION = "loader-v5"
 
 ------------------------------------------------------------
 -- Уведомления (Xeno-совместимые)
@@ -115,5 +115,5 @@ if not runOk then
     notify("Ошибка при запуске скрипта: " .. tostring(runErr), 8)
 else
     notify("Formula Apex Spectator активен. HUD должен появиться на экране.", 4)
-    notify("Далее: нажмите START MONITORING в окне — до этого DNF не начисляются. Кнопки шапки: – (скрыть), P/U (закреп), G (прозрачный режим), ? (справка).", 8)
+    notify("Далее: нажмите START MONITORING в окне — до этого DNF не начисляются. Кнопки шапки слева направо: – скрыть, P/U закреп чёрным, p лёгкая прозрачность, A сильная прозрачность, ? справка.", 8)
 end
