@@ -406,24 +406,69 @@ local gui, mainFrame, pilotsLabel, crashLogLabel, hideBtn, collapsed = nil, nil,
 local pinBtn, clearBtn, pinned = nil, nil, false
 local titleLbl = nil
 
--- Кликабельность HUD: пробуем отключить блокировку кликов через
--- InputBegan/TouchBegan (свойства VisibleClipsDown и т.п. не помогают —
--- Roblox всё равно перехватывает клики над GUI). Если способ недоступен
--- в исполнителе — просто делаем фон полностью прозрачным.
+-- Срез списка подключений у объекта (совместимость со старыми движками)
+local function getConnsOf(obj, signalName)
+    local ok, conns = pcall(function()
+        local sig = obj[signalName]
+        if sig and sig.GetConnections then
+            return sig:GetConnections()
+        end
+    end)
+    return (ok and type(conns) == "table") and conns or nil
+end
+
+-- В закреплённом режиме окно перестаёт реагировать на ввод:
+-- обрываем все подключения кликов по фрейму и его потомкам, снимаем Active/Draggable.
+-- Через несколько кадров дополнительно включаем TranslucentHitbox (если поддерживается),
+-- чтобы клики проходили сквозь HUD к игре.
 local function setInputPassThrough(enabled)
     if not mainFrame then return end
-    pcall(function()
-        for _, connName in ipairs({ "InputBegan", "MouseEnter" }) do
-            local okGet, getConn = pcall(function()
-                return mainFrame[connName] and mainFrame[connName]:GetConnections()
-            end)
-            if okGet and type(getConn) == "table" then
-                for _, c in ipairs(getConn) do
+    if enabled then
+        pcall(function()
+            mainFrame.Active = false
+            mainFrame.Draggable = false
+        end)
+        pcall(function()
+            local targets = { mainFrame }
+            for _, d in ipairs(mainFrame:GetDescendants()) do
+                table.insert(targets, d)
+            end
+            for _, obj in ipairs(targets) do
+                for _, sigName in ipairs({ "InputBegan", "InputChanged", "InputEnded",
+                    "MouseButton1Click", "MouseButton1Down", "MouseButton1Up",
+                    "MouseEnter", "MouseLeave" }) do
+                    local conns = getConnsOf(obj, sigName)
+                    if conns then
+                        for _, c in ipairs(conns) do
+                            pcall(function() c:Disconnect() end)
+                        end
+                    end
+                end
+            end
+        end)
+        -- Фолбэк-метод для старых движков: глобальный сигнал UserInputService
+        pcall(function()
+            local UIS = game:GetService("UserInputService")
+            local conns = getConnsOf(UIS, "InputBegan")
+            if conns then
+                for _, c in ipairs(conns) do
                     pcall(function() c:Disconnect() end)
                 end
             end
-        end
-    end)
+        end)
+        spawn(function()
+            wait(0.35)
+            pcall(function() mainFrame.TranslucentHitbox = true end)
+            pcall(function() gui.TranslucentHitbox = true end)
+        end)
+    else
+        pcall(function()
+            mainFrame.Active = true
+            mainFrame.Draggable = true
+        end)
+        pcall(function() mainFrame.TranslucentHitbox = false end)
+        pcall(function() gui.TranslucentHitbox = false end)
+    end
 end
 
 -- Безопасная установка RichText: если исполнитель не поддерживает HTML-теги,
@@ -445,9 +490,9 @@ local function enableRich(label)
     pcall(function() label.RichText = true end)
 end
 
-local function createGui()
-    gui = createGuiSafe()
-
+-- Всё содержимое окна HUD (создаётся/пересобирается целиком)
+local buildGuiContents
+buildGuiContents = function()
     mainFrame = Instance.new("Frame")
     mainFrame.Name = "MainFrame"
     mainFrame.Size = UDim2.new(0, 380, 0, 420)
@@ -494,7 +539,7 @@ local function createGui()
     Instance.new("UICorner", hideBtn).CornerRadius = UDim.new(0, 8)
 
     -- Кнопка закрепления (pin): в закреплённом режиме окно не двигается,
-    -- фон полностью прозрачен и клики проходят сквозь HUD.
+    -- фон становится чёрным и непрозрачным, клики проходят сквозь HUD.
     pinBtn = Instance.new("TextButton")
     pinBtn.Name = "PinToggle"
     pinBtn.Size = UDim2.new(0, 34, 0, 34)
@@ -503,38 +548,30 @@ local function createGui()
     pinBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
     pinBtn.Font = Enum.Font.GothamBold
     pinBtn.TextSize = 16
-    pinBtn.Text = "📌"
+    pinBtn.Text = pinned and "U" or "P"
     pinBtn.AutoButtonColor = true
     pinBtn.Parent = mainFrame
     Instance.new("UICorner", pinBtn).CornerRadius = UDim.new(0, 8)
 
     local function applyPinMode()
         if pinned then
-            mainFrame.Draggable = false
-            setInputPassThrough(true)
-            for _, obj in ipairs(mainFrame:GetDescendants()) do
-                if (obj:IsA("TextLabel") or obj:IsA("Frame")) and obj.Name ~= "Title" then
-                    pcall(function() obj.BackgroundTransparency = 1 end)
-                elseif obj:IsA("UIStroke") and obj.Name == "Border" then
-                    pcall(function() obj.Transparency = 0.75 end)
-                end
-            end
-            mainFrame.BackgroundTransparency = 1
-            pilotsLabel.BackgroundTransparency = 1
-            crashLogLabel.BackgroundTransparency = 1
-            if titleLbl then pcall(function() titleLbl.TextTransparency = 0.35 end) end
-            pinBtn.Text = "🔓"
-            print("[Spectator] HUD закреплён: окно не двигается, фон прозрачный.")
-        else
-            mainFrame.Draggable = true
-            mainFrame.BackgroundTransparency = 0.15
-            pilotsLabel.BackgroundTransparency = 1
-            crashLogLabel.BackgroundTransparency = 1
-            if titleLbl then pcall(function() titleLbl.TextTransparency = 0 end) end
+            mainFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+            mainFrame.BackgroundTransparency = 0
             local strokeInst = mainFrame:FindFirstChild("Border")
-            if strokeInst then pcall(function() strokeInst.Transparency = 0.4 end) end
-            pinBtn.Text = "📌"
-            print("[Spectator] HUD откреплён: окно снова перемещаемое с фоном.")
+            if strokeInst then pcall(function() strokeInst.Color = Color3.fromRGB(90, 90, 90) end) end
+            if titleLbl then pcall(function() titleLbl.TextTransparency = 0 end) end
+            setInputPassThrough(true)
+            pinBtn.Text = "U"
+            print("[Spectator] HUD закреплён: окно неподвижно, фон чёрный, клики сквозь HUD.")
+        else
+            mainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+            mainFrame.BackgroundTransparency = 0.15
+            local strokeInst = mainFrame:FindFirstChild("Border")
+            if strokeInst then pcall(function() strokeInst.Color = Color3.fromRGB(220, 40, 40) end) end
+            if titleLbl then pcall(function() titleLbl.TextTransparency = 0 end) end
+            setInputPassThrough(false)
+            pinBtn.Text = "P"
+            print("[Spectator] HUD откреплён: окно снова перемещаемое.")
         end
     end
 
@@ -552,6 +589,8 @@ local function createGui()
             crashLogLabel.Visible = false
             local lt = mainFrame:FindFirstChild("LogTitle")
             if lt then lt.Visible = false end
+            local cb = mainFrame:FindFirstChild("ClearLog")
+            if cb then cb.Visible = false end
             hideBtn.Text = "+"
         else
             mainFrame.Size = UDim2.new(0, 380, 0, 420)
@@ -559,7 +598,9 @@ local function createGui()
             crashLogLabel.Visible = true
             local lt = mainFrame:FindFirstChild("LogTitle")
             if lt then lt.Visible = true end
-            hideBtn.Text = "–"
+            local cb = mainFrame:FindFirstChild("ClearLog")
+            if cb then cb.Visible = true end
+            hideBtn.Text = "-"
         end
     end)
 
@@ -690,12 +731,17 @@ spawn(function()
         local ok2, g = pcall(buildScreenGui, entry.obj)
         if ok2 and g then
             gui = g
-            pcall(createGuiChildren) -- пересобрать содержимое, если функция доступна
+            pcall(buildGuiContents) -- пересобрать содержимое окна
             print("[Spectator] HUD пересоздан через: " .. entry.name)
             break
         end
     end
 end)
+
+local function createGui()
+    gui = createGuiSafe()
+    buildGuiContents()
+end
 
 local okGui, errGui = pcall(createGui)
 if not okGui then
