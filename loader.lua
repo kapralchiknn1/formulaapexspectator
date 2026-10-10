@@ -1,27 +1,115 @@
 ------------------------------------------------------------
--- Formula Apex Spectator — лоадер для Xeno (v1.3.6 / v1.6+)
--- Вставьте эту одну строку в Xeno и нажмите Execute:
+-- Formula Apex Spectator — лоадер v2 для Xeno (1.3.6 / 1.6+)
 --
-loadstring(game:HttpGet("https://raw.githubusercontent.com/kapralchiknn1/formulaapexspectator/main/main.lua"))()
+-- Вставьте в Xeno ОДНУ строку и нажмите Execute:
 --
--- Скрипт загружается с GitHub, поэтому всегда актуальная версия.
+loadstring(game:HttpGet("https://raw.githubusercontent.com/kapralchiknn1/formulaapexspectator/main/loader.lua"))()
+--
+-- Что делает этот лоадер:
+--   1. Проверяет, что вы находитесь в игре Formula Apex (не в лобби Roblox).
+--   2. Скачивает актуальный main.lua с GitHub (с повторными попытками).
+--   3. Показывает статус загрузки через onnotify (Xeno) / чат / warn.
+--   4. Защищает от пустого/ битого ответа raw-ссылки.
 ------------------------------------------------------------
 
-local URL = "https://raw.githubusercontent.com/kapralchiknn1/formulaapexspectator/main/main.lua"
+local REPO_RAW = "https://raw.githubusercontent.com/kapralchiknn1/formulaapexspectator/main/"
+local SCRIPT_URL = REPO_RAW .. "main.lua"
+local VERSION = "loader-v2"
 
-local ok, source = pcall(function()
-    return game:HttpGet(URL)
-end)
+------------------------------------------------------------
+-- Уведомления (Xeno-совместимые)
+------------------------------------------------------------
+local function notify(text, duration)
+    duration = duration or 5
+    -- onnotify — встроенный хук Xeno (есть в 1.3.x и 1.6.x)
+    local okNotify = pcall(function()
+        if typeof(onnotify) == "function" then
+            onnotify("Formula Apex Spectator", text, duration, 1)
+        elseif typeof(onnotify) == "Instance" and onnotify:IsA("BindableFunction") then
+            task.spawn(onnotify.Invoke, onnotify, "Formula Apex Spectator", text, duration, 1)
+        else
+            error("no onnotify")
+        end
+    end)
+    if not okNotify then
+        -- фолбэк в чат
+        pcall(function()
+            local Chat = game:GetService("Chat")
+            local speaker = game.Players.LocalPlayer
+            if speaker and speaker.Character then
+                Chat:Chat(speaker.Character:FindFirstChildWhichIsA("Head"),
+                    "[FAS] " .. text, 1)
+            end
+        end)
+        warn("[FormulaApexSpectator] " .. text)
+    end
+end
 
-if not ok or type(source) ~= "string" or #source == 0 then
-    warn("[FormulaApexSpectator] Не удалось загрузить скрипт с GitHub. Попробуйте позже или проверьте интернет.")
+------------------------------------------------------------
+-- Проверка, что запущена именно Formula Apex
+------------------------------------------------------------
+local function isFormulaApex()
+    local placeId = game.PlaceId
+    -- Официальные placeId Formula Apex (FA Racing / Formula Apex)
+    local known = { 7811790856, 8407672520 }
+    for _, id in ipairs(known) do
+        if placeId == id then return true end
+    end
+    -- эвристически: ищем признаки игры в Workspace
+    local ws = game:GetService("Workspace")
+    if ws:FindFirstChild("RaceTrack") or ws:FindFirstChild("Tracks")
+        or ws:FindFirstChild("PitLane") or ws:FindFirstChild("StartLine") then
+        return true
+    end
+    return false
+end
+
+if not isFormulaApex() then
+    notify("Вы не в Formula Apex! Зайдите на сервер игры и выполните скрипт снова.", 8)
+    warn("[FormulaApexSpectator][" .. VERSION .. "] PlaceId = " .. tostring(game.PlaceId)
+        .. " — игра не распознана как Formula Apex.")
+end
+
+------------------------------------------------------------
+-- Загрузка main.lua с повторами
+------------------------------------------------------------
+local HttpService = game:GetService("HttpService")
+local source
+
+for attempt = 1, 3 do
+    local ok, result = pcall(function()
+        return game:HttpGet(SCRIPT_URL, true)
+    end)
+    if ok and type(result) == "string" and #result > 100 then
+        source = result
+        break
+    end
+    notify("Попытка " .. attempt .. "/3: загрузка скрипта не удалась, повторяю...", 3)
+    task.wait(2)
+end
+
+if not source then
+    notify("Не удалось скачать main.lua с GitHub. Проверьте интернет или попробуйте позже.", 8)
     return
 end
 
-local chunk, err = loadstring(source)
+-- грубая проверка, что скачался именно скрипт, а не страница 404
+if source:find("404: Not Found", 1, true) or source:find("<!DOCTYPE", 1, true) then
+    notify("GitHub вернул ошибку 404 — файл main.lua не найден в репозитории.", 8)
+    return
+end
+
+local chunk, compileErr = loadstring(source)
 if not chunk then
-    warn("[FormulaApexSpectator] Ошибка компиляции скрипта: " .. tostring(err))
+    notify("Ошибка компиляции скрипта: " .. tostring(compileErr), 8)
     return
 end
 
-chunk()
+notify("Скрипт загружен (" .. math.floor(#source / 1024) .. " KB, " .. VERSION .. "), запуск...", 3)
+
+local runOk, runErr = pcall(chunk)
+if not runOk then
+    notify("Ошибка при запуске скрипта: " .. tostring(runErr), 8)
+else
+    notify("Formula Apex Spectator активен. HUD должен появиться на экране.", 4)
+end
