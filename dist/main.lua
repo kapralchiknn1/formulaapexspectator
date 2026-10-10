@@ -403,6 +403,73 @@ end
 -- GUI (HUD)
 ------------------------------------------------------------
 local gui, mainFrame, pilotsLabel, crashLogLabel, hideBtn, collapsed = nil, nil, nil, nil, nil, false
+local pinBtn, clearBtn, pinned = nil, nil, false
+local titleLbl = nil
+
+-- Срез списка подключений у объекта (совместимость со старыми движками)
+local function getConnsOf(obj, signalName)
+    local ok, conns = pcall(function()
+        local sig = obj[signalName]
+        if sig and sig.GetConnections then
+            return sig:GetConnections()
+        end
+    end)
+    return (ok and type(conns) == "table") and conns or nil
+end
+
+-- В закреплённом режиме окно перестаёт реагировать на ввод:
+-- обрываем все подключения кликов по фрейму и его потомкам, снимаем Active/Draggable.
+-- Через несколько кадров дополнительно включаем TranslucentHitbox (если поддерживается),
+-- чтобы клики проходили сквозь HUD к игре.
+local function setInputPassThrough(enabled)
+    if not mainFrame then return end
+    if enabled then
+        pcall(function()
+            mainFrame.Active = false
+            mainFrame.Draggable = false
+        end)
+        pcall(function()
+            local targets = { mainFrame }
+            for _, d in ipairs(mainFrame:GetDescendants()) do
+                table.insert(targets, d)
+            end
+            for _, obj in ipairs(targets) do
+                for _, sigName in ipairs({ "InputBegan", "InputChanged", "InputEnded",
+                    "MouseButton1Click", "MouseButton1Down", "MouseButton1Up",
+                    "MouseEnter", "MouseLeave" }) do
+                    local conns = getConnsOf(obj, sigName)
+                    if conns then
+                        for _, c in ipairs(conns) do
+                            pcall(function() c:Disconnect() end)
+                        end
+                    end
+                end
+            end
+        end)
+        -- Фолбэк-метод для старых движков: глобальный сигнал UserInputService
+        pcall(function()
+            local UIS = game:GetService("UserInputService")
+            local conns = getConnsOf(UIS, "InputBegan")
+            if conns then
+                for _, c in ipairs(conns) do
+                    pcall(function() c:Disconnect() end)
+                end
+            end
+        end)
+        spawn(function()
+            wait(0.35)
+            pcall(function() mainFrame.TranslucentHitbox = true end)
+            pcall(function() gui.TranslucentHitbox = true end)
+        end)
+    else
+        pcall(function()
+            mainFrame.Active = true
+            mainFrame.Draggable = true
+        end)
+        pcall(function() mainFrame.TranslucentHitbox = false end)
+        pcall(function() gui.TranslucentHitbox = false end)
+    end
+end
 
 -- Безопасная установка RichText: если исполнитель не поддерживает HTML-теги,
 -- включаем обычный текст (иначе <font color="..."> показывается как код).
@@ -423,9 +490,9 @@ local function enableRich(label)
     pcall(function() label.RichText = true end)
 end
 
-local function createGui()
-    gui = createGuiSafe()
-
+-- Всё содержимое окна HUD (создаётся/пересобирается целиком)
+local buildGuiContents
+buildGuiContents = function()
     mainFrame = Instance.new("Frame")
     mainFrame.Name = "MainFrame"
     mainFrame.Size = UDim2.new(0, 380, 0, 420)
@@ -440,21 +507,22 @@ local function createGui()
     Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 10)
 
     local stroke = Instance.new("UIStroke")
+    stroke.Name = "Border"
     stroke.Color = Color3.fromRGB(220, 40, 40)
     stroke.Thickness = 2
     stroke.Transparency = 0.4
     stroke.Parent = mainFrame
 
-    local title = Instance.new("TextLabel")
-    title.Name = "Title"
-    title.Size = UDim2.new(1, -50, 0, 40)
-    title.Position = UDim2.new(0, 0, 0, 0)
-    title.BackgroundTransparency = 1
-    title.Font = Enum.Font.GothamBold
-    title.TextSize = 20
-    title.TextColor3 = Color3.fromRGB(255, 70, 70)
-    title.Text = "FORMULA APEX | SPECTATOR"
-    title.Parent = mainFrame
+    titleLbl = Instance.new("TextLabel")
+    titleLbl.Name = "Title"
+    titleLbl.Size = UDim2.new(1, -50, 0, 40)
+    titleLbl.Position = UDim2.new(0, 0, 0, 0)
+    titleLbl.BackgroundTransparency = 1
+    titleLbl.Font = Enum.Font.GothamBold
+    titleLbl.TextSize = 20
+    titleLbl.TextColor3 = Color3.fromRGB(255, 70, 70)
+    titleLbl.Text = "FORMULA APEX | SPECTATOR"
+    titleLbl.Parent = mainFrame
 
     -- Кнопка скрытия/показа HUD
     hideBtn = Instance.new("TextButton")
@@ -470,6 +538,49 @@ local function createGui()
     hideBtn.Parent = mainFrame
     Instance.new("UICorner", hideBtn).CornerRadius = UDim.new(0, 8)
 
+    -- Кнопка закрепления (pin): в закреплённом режиме окно не двигается,
+    -- фон становится чёрным и непрозрачным, клики проходят сквозь HUD.
+    pinBtn = Instance.new("TextButton")
+    pinBtn.Name = "PinToggle"
+    pinBtn.Size = UDim2.new(0, 34, 0, 34)
+    pinBtn.Position = UDim2.new(1, -78, 0, 3)
+    pinBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+    pinBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    pinBtn.Font = Enum.Font.GothamBold
+    pinBtn.TextSize = 16
+    pinBtn.Text = pinned and "U" or "P"
+    pinBtn.AutoButtonColor = true
+    pinBtn.Parent = mainFrame
+    Instance.new("UICorner", pinBtn).CornerRadius = UDim.new(0, 8)
+
+    local function applyPinMode()
+        if pinned then
+            mainFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+            mainFrame.BackgroundTransparency = 0
+            local strokeInst = mainFrame:FindFirstChild("Border")
+            if strokeInst then pcall(function() strokeInst.Color = Color3.fromRGB(90, 90, 90) end) end
+            if titleLbl then pcall(function() titleLbl.TextTransparency = 0 end) end
+            setInputPassThrough(true)
+            pinBtn.Text = "U"
+            print("[Spectator] HUD закреплён: окно неподвижно, фон чёрный, клики сквозь HUD.")
+        else
+            mainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+            mainFrame.BackgroundTransparency = 0.15
+            local strokeInst = mainFrame:FindFirstChild("Border")
+            if strokeInst then pcall(function() strokeInst.Color = Color3.fromRGB(220, 40, 40) end) end
+            if titleLbl then pcall(function() titleLbl.TextTransparency = 0 end) end
+            setInputPassThrough(false)
+            pinBtn.Text = "P"
+            print("[Spectator] HUD откреплён: окно снова перемещаемое.")
+        end
+    end
+
+    pinBtn.MouseButton1Click:Connect(function()
+        pinned = not pinned
+        local ok, err = pcall(applyPinMode)
+        if not ok then warn("[Spectator] Pin mode error:", err) end
+    end)
+
     hideBtn.MouseButton1Click:Connect(function()
         collapsed = not collapsed
         if collapsed then
@@ -478,6 +589,8 @@ local function createGui()
             crashLogLabel.Visible = false
             local lt = mainFrame:FindFirstChild("LogTitle")
             if lt then lt.Visible = false end
+            local cb = mainFrame:FindFirstChild("ClearLog")
+            if cb then cb.Visible = false end
             hideBtn.Text = "+"
         else
             mainFrame.Size = UDim2.new(0, 380, 0, 420)
@@ -485,7 +598,9 @@ local function createGui()
             crashLogLabel.Visible = true
             local lt = mainFrame:FindFirstChild("LogTitle")
             if lt then lt.Visible = true end
-            hideBtn.Text = "–"
+            local cb = mainFrame:FindFirstChild("ClearLog")
+            if cb then cb.Visible = true end
+            hideBtn.Text = "-"
         end
     end)
 
@@ -515,6 +630,26 @@ local function createGui()
     logTitle.TextXAlignment = Enum.TextXAlignment.Left
     logTitle.Text = "Crash / DNF Log:"
     logTitle.Parent = mainFrame
+
+    -- Кнопка очистки логов аварий
+    clearBtn = Instance.new("TextButton")
+    clearBtn.Name = "ClearLog"
+    clearBtn.Size = UDim2.new(0, 74, 0, 22)
+    clearBtn.Position = UDim2.new(1, -86, 0, 281)
+    clearBtn.BackgroundColor3 = Color3.fromRGB(60, 40, 40)
+    clearBtn.TextColor3 = Color3.fromRGB(255, 200, 200)
+    clearBtn.Font = Enum.Font.GothamBold
+    clearBtn.TextSize = 12
+    clearBtn.Text = "CLEAR"
+    clearBtn.AutoButtonColor = true
+    clearBtn.Parent = mainFrame
+    Instance.new("UICorner", clearBtn).CornerRadius = UDim.new(0, 6)
+
+    clearBtn.MouseButton1Click:Connect(function()
+        for i = #CrashLog, 1, -1 do CrashLog[i] = nil end
+        pcall(function() crashLogLabel.Text = "Логи очищены" end)
+        print("[Spectator] Crash/DNF логи очищены.")
+    end)
 
     crashLogLabel = Instance.new("TextLabel")
     crashLogLabel.Name = "CrashLog"
@@ -596,12 +731,17 @@ spawn(function()
         local ok2, g = pcall(buildScreenGui, entry.obj)
         if ok2 and g then
             gui = g
-            pcall(createGuiChildren) -- пересобрать содержимое, если функция доступна
+            pcall(buildGuiContents) -- пересобрать содержимое окна
             print("[Spectator] HUD пересоздан через: " .. entry.name)
             break
         end
     end
 end)
+
+local function createGui()
+    gui = createGuiSafe()
+    buildGuiContents()
+end
 
 local okGui, errGui = pcall(createGui)
 if not okGui then
