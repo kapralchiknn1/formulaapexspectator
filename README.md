@@ -70,7 +70,7 @@ loadstring(game:HttpGet("https://raw.githubusercontent.com/kapralchiknn1/formula
 ## Лицензия
 MIT © 2026 kapralchiknn1
 
-##Лига
+## Лига
 Этот проект делался для федерации FMCA - одной из самых больших по Formula Apex. Там же вы сможете поучаствовать в лиге по F1 25/F1 26/ Ссылки ниже
 
 PFC1(F1) - https://t.me/FMCA_PFC1
