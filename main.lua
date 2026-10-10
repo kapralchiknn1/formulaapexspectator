@@ -522,6 +522,30 @@ end
 ------------------------------------------------------------
 -- Запуск
 ------------------------------------------------------------
+------------------------------------------------------------
+-- Страж HUD: если через 5 секунд GUI не виден — пересоздаём во всех доступных родителях
+------------------------------------------------------------
+spawn(function()
+    wait(5)
+    local ok, visible = pcall(function()
+        return gui and gui.Parent ~= nil
+    end)
+    if ok and visible then
+        print("[Spectator] HUD активен (родитель: " .. tostring(createdVia) .. ")")
+        return
+    end
+    warn("[Spectator] HUD не виден — пробую все UI-родители заново...")
+    for _, entry in ipairs(guiParents()) do
+        local ok2, g = pcall(buildScreenGui, entry.obj)
+        if ok2 and g then
+            gui = g
+            pcall(createGuiChildren) -- пересобрать содержимое, если функция доступна
+            print("[Spectator] HUD пересоздан через: " .. entry.name)
+            break
+        end
+    end
+end)
+
 local okGui, errGui = pcall(createGui)
 if not okGui then
     warn("[Spectator] Не удалось создать HUD:", errGui)
