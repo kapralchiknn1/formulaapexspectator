@@ -1,6 +1,6 @@
 --[[
     Formula Apex — Spectator / Crash Monitor Injector Script
-    Совместимо с Xeno v1.6 (XenoInjector)
+    Совместимо с Xeno v1.3.6 (а также новее: v1.6+)
 
     Назначение:
     Автоматическое наблюдение за пилотами в игре Formula Apex (Roblox).
@@ -8,25 +8,36 @@
     (краши), кто и когда разбил машину, и выводит информацию в удобный
     HUD-интерфейс прямо в игре. Полезно для лиг и стримов.
 
-    Как использовать с Xeno v1.6:
+    Как использовать с Xeno v1.3.6:
     1. Запустите Roblox и зайдите в Formula Apex.
-    2. Откройте Xeno v1.6, нажмите Attach к процессу Roblox.
+    2. Откройте Xeno v1.3.6, нажмите Inject/Attach к процессу Roblox.
     3. Вставьте содержимое этого файла в редактор скриптов Xeno.
-    4. Нажмите Execute (Play).
+    4. Нажмите Execute.
+    Примечание: в v1.3.6 функция gethui() может отсутствовать — скрипт
+    автоматически использует фолбэк на CoreGui, затем PlayerGui.
 ]]
 
 ------------------------------------------------------------
--- Совместимость с Xeno v1.6: gethui() вместо CoreGui (обходит защиту)
+-- Совместимость с Xeno v1.3.6: gethui() -> CoreGui -> PlayerGui
 ------------------------------------------------------------
 local function getParentForGui()
-    local ok, hui = pcall(gethui)
-    if ok and hui then return hui end
-    ok = pcall(function() return getgenv().gethui() end)
-    if ok then return getgenv().gethui() end
-    ok, hui = pcall(function() return game:GetService("CoreGui") end)
-    if ok then return hui end
+    -- gethui() есть не во всех сборках Xeno — проверяем аккуратно
+    local gethuiFn = (type(gethui) == "function") and gethui
+        or (type(getgenv) == "function" and type(getgenv().gethui) == "function" and getgenv().gethui)
+    if gethuiFn then
+        local ok, hui = pcall(gethuiFn)
+        if ok and hui then return hui end
+    end
+    local ok, coreGui = pcall(function() return game:GetService("CoreGui") end)
+    if ok and coreGui then return coreGui end
     return game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
 end
+
+------------------------------------------------------------
+-- Фолбэки task.* для старых исполнителей (Xeno v1.3.6)
+------------------------------------------------------------
+local wait  = (type(task) == "table" and task.wait)  or wait
+local spawn = (type(task) == "table" and task.spawn) or spawn
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -138,7 +149,7 @@ local function addCrashEvent(userId, name)
 
     -- Отправка на вебхук при необходимости
     if CONFIG.WEBHOOK_ENABLED and CONFIG.WEBHOOK_URL ~= "" then
-        task.spawn(function()
+        spawn(function()
             local ok, err = pcall(function()
                 local payload = HttpService:JSONEncode({
                     username = "Formula Apex Crash Bot",
@@ -227,7 +238,7 @@ local function createGui()
     gui.Name = "ApexSpectatorHUD"
     gui.ResetOnSpawn = false
     gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    gui.Parent = getParentForGui() -- gethui() для Xeno v1.6
+    gui.Parent = getParentForGui() -- gethui()/CoreGui для Xeno v1.3.6
 
     mainFrame = Instance.new("Frame")
     mainFrame.Name = "MainFrame"
@@ -351,11 +362,11 @@ end
 -- Запуск
 ------------------------------------------------------------
 local function main()
-    print("[Formula Apex Spectator] Загрузка... (Xeno v1.6 compatible)")
+    print("[Formula Apex Spectator] Загрузка... (Xeno v1.3.6 compatible)")
     createGui()
 
-    task.spawn(function()
-        while task.wait(CONFIG.REFRESH_INTERVAL) do
+    spawn(function()
+        while wait(CONFIG.REFRESH_INTERVAL) do
             local ok, err = pcall(updatePilotData)
             if not ok then warn("[Spectator] Update error:", err) end
 
