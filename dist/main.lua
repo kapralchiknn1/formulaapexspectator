@@ -402,7 +402,26 @@ end
 ------------------------------------------------------------
 -- GUI (HUD)
 ------------------------------------------------------------
-local gui, mainFrame, pilotsLabel, crashLogLabel
+local gui, mainFrame, pilotsLabel, crashLogLabel, hideBtn, collapsed = nil, nil, nil, nil, nil, false
+
+-- Безопасная установка RichText: если исполнитель не поддерживает HTML-теги,
+-- включаем обычный текст (иначе <font color="..."> показывается как код).
+local function setRich(label, htmlText, plainText)
+    if not label then return end
+    local okSet = pcall(function() label.RichText = true end)
+    if okSet and label.RichText == true then
+        local okT = pcall(function() label.Text = htmlText end)
+        if okT then return end
+    end
+    pcall(function() label.RichText = false end)
+    local stripped = htmlText:gsub("</?[^>]+>", "")
+    pcall(function() label.Text = plainText or stripped end)
+end
+
+-- Принудительно включаем RichText на label при создании
+local function enableRich(label)
+    pcall(function() label.RichText = true end)
+end
 
 local function createGui()
     gui = createGuiSafe()
@@ -428,7 +447,7 @@ local function createGui()
 
     local title = Instance.new("TextLabel")
     title.Name = "Title"
-    title.Size = UDim2.new(1, 0, 0, 40)
+    title.Size = UDim2.new(1, -50, 0, 40)
     title.Position = UDim2.new(0, 0, 0, 0)
     title.BackgroundTransparency = 1
     title.Font = Enum.Font.GothamBold
@@ -436,6 +455,39 @@ local function createGui()
     title.TextColor3 = Color3.fromRGB(255, 70, 70)
     title.Text = "FORMULA APEX | SPECTATOR"
     title.Parent = mainFrame
+
+    -- Кнопка скрытия/показа HUD
+    hideBtn = Instance.new("TextButton")
+    hideBtn.Name = "HideToggle"
+    hideBtn.Size = UDim2.new(0, 34, 0, 34)
+    hideBtn.Position = UDim2.new(1, -40, 0, 3)
+    hideBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+    hideBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    hideBtn.Font = Enum.Font.GothamBold
+    hideBtn.TextSize = 18
+    hideBtn.Text = "–"
+    hideBtn.AutoButtonColor = true
+    hideBtn.Parent = mainFrame
+    Instance.new("UICorner", hideBtn).CornerRadius = UDim.new(0, 8)
+
+    hideBtn.MouseButton1Click:Connect(function()
+        collapsed = not collapsed
+        if collapsed then
+            mainFrame.Size = UDim2.new(0, 380, 0, 40)
+            pilotsLabel.Visible = false
+            crashLogLabel.Visible = false
+            local lt = mainFrame:FindFirstChild("LogTitle")
+            if lt then lt.Visible = false end
+            hideBtn.Text = "+"
+        else
+            mainFrame.Size = UDim2.new(0, 380, 0, 420)
+            pilotsLabel.Visible = true
+            crashLogLabel.Visible = true
+            local lt = mainFrame:FindFirstChild("LogTitle")
+            if lt then lt.Visible = true end
+            hideBtn.Text = "–"
+        end
+    end)
 
     pilotsLabel = Instance.new("TextLabel")
     pilotsLabel.Name = "PilotsList"
@@ -449,6 +501,7 @@ local function createGui()
     pilotsLabel.TextColor3 = Color3.fromRGB(230, 230, 230)
     pilotsLabel.TextWrapped = true
     pilotsLabel.Text = "Ожидание данных..."
+    enableRich(pilotsLabel)
     pilotsLabel.Parent = mainFrame
 
     local logTitle = Instance.new("TextLabel")
@@ -481,13 +534,12 @@ end
 local function refreshGui()
     if not pilotsLabel then return end
 
-    local lines = {}
-    table.insert(lines, ("Pilots online: %d"):format(#Players:GetPlayers()))
-    table.insert(lines, "")
+    local htmlLines = { ("Pilots online: %d"):format(#Players:GetPlayers()), "" }
+    local plainLines = { ("Pilots online: %d"):format(#Players:GetPlayers()), "" }
 
     local entries = {}
     for uid, d in pairs(PilotData) do
-        table.insert(entries, { uid = uid, name = d.Name, speed = d.Speed, health = d.Health, dnf = d.DNF, crashed = d.Crashed, found = d.CarFound })
+        table.insert(entries, { uid = uid, name = d.Name, speed = d.Speed, dnf = d.DNF, crashed = d.Crashed, found = d.CarFound })
     end
     table.sort(entries, function(a, b) return a.speed > b.speed end)
 
@@ -502,14 +554,19 @@ local function refreshGui()
         else
             statusIcon, colorTag = "[OK]", "#44dd66"
         end
-        local hpText = e.health and string.format("%.0f%%", e.health) or "n/a"
         local carText = e.found and "" or " (car hidden)"
-        table.insert(lines, ('<font color="%s">%s</font> %s%s — %d m/s, HP: %s'):format(
-            colorTag, statusIcon, e.name, carText, math.floor(e.speed * 0.44704 + 0.5), hpText))
-        if i >= 20 then table.insert(lines, "..."); break end
+        table.insert(htmlLines, ('<font color="%s">%s</font> %s%s — %d m/s'):format(
+            colorTag, statusIcon, e.name, carText, math.floor(e.speed * 0.44704 + 0.5)))
+        table.insert(plainLines, ("%s %s%s — %d m/s"):format(
+            statusIcon, e.name, carText, math.floor(e.speed * 0.44704 + 0.5)))
+        if i >= 20 then
+            table.insert(htmlLines, "...")
+            table.insert(plainLines, "...")
+            break
+        end
     end
 
-    pilotsLabel.Text = table.concat(lines, "\n")
+    setRich(pilotsLabel, table.concat(htmlLines, "\n"), table.concat(plainLines, "\n"))
 
     local logLines = {}
     for i = 1, math.min(6, #CrashLog) do
