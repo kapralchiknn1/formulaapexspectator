@@ -15,9 +15,9 @@ loadstring(game:HttpGet("https://raw.githubusercontent.com/kapralchiknn1/formula
 ------------------------------------------------------------
 
 local REPO_RAW = "https://raw.githubusercontent.com/kapralchiknn1/formulaapexspectator/main/"
-local LOADER_BUILD = "2026-10-10-5" -- обновляется вместе с main.lua
+local LOADER_BUILD = "2026-10-10-6" -- обновляется вместе с main.lua
 local SCRIPT_URL = REPO_RAW .. "main.lua?cb=" .. LOADER_BUILD .. "-" .. tostring(math.random(100000, 999999))
-local VERSION = "loader-v5"
+local VERSION = "loader-v6"
 
 ------------------------------------------------------------
 -- Уведомления (Xeno-совместимые)

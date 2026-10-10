@@ -423,14 +423,21 @@ end
 -- GUI (HUD)
 ------------------------------------------------------------
 local gui, mainFrame, pilotsLabel, crashLogLabel, hideBtn, collapsed = nil, nil, nil, nil, nil, false
-local pinBtn, clearBtn, helpBtn, ghostBtn, alphaBtn = nil, nil, nil, nil, nil
+local aBtn, pBtn, clearBtn, helpBtn = nil, nil, nil, nil
 local pinned = false
--- Прозрачность HUD: normal (обычный) / ghost (P — чуть прозрачнее обычного) / alpha (A — сильно прозрачный)
-local hudAlpha = "normal"
+-- Режимы закрепления окна:
+--   A — закрепление + фон НЕПРОЗРАЧНЫЙ и темнее обычного (текст виден лучше всего)
+--   P — закрепление + фон ЧУТЬ прозрачнее обычного (тоже хорошо читаемо)
+-- hudMode == "normal" — окно не закреплено, обычный вид, перетаскивается.
+local hudMode = "normal"
 local helpWindow, helpVisible = nil, false
 local HEADER_H = 40 -- высота шапки HUD (с кнопками)
 local startBtn = nil
 local titleLbl = nil
+
+-- Forward-декларации (реализации ниже, внутри buildGuiContents)
+local applyHudMode
+local togglePinMode
 
 -- Срез списка подключений у объекта (совместимость со старыми движками)
 local function getConnsOf(obj, signalName)
@@ -566,47 +573,37 @@ buildGuiContents = function()
     hideBtn.Parent = mainFrame
     Instance.new("UICorner", hideBtn).CornerRadius = UDim.new(0, 8)
 
-    -- Кнопка «P» — лёгкая прозрачность: HUD становится чуть прозрачнее
-    -- обычного режима (фон и текст полупрозрачные), окно остаётся на месте.
-    ghostBtn = Instance.new("TextButton")
-    ghostBtn.Name = "GhostToggle"
-    ghostBtn.Size = UDim2.new(0, 30, 0, 30)
-    ghostBtn.Position = UDim2.new(1, -140, 0, 5)
-    ghostBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
-    ghostBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    ghostBtn.Font = Enum.Font.GothamBold
-    ghostBtn.TextSize = 16
-    ghostBtn.Text = "P"
-    ghostBtn.AutoButtonColor = true
-    ghostBtn.Parent = mainFrame
-    Instance.new("UICorner", ghostBtn).CornerRadius = UDim.new(0, 8)
+    -- Кнопка «A» — закрепить окно + фон НЕПРОЗРАЧНЫЙ и темнее обычного
+    -- (текст виден лучше всего). Повторное нажатие — открепить.
+    aBtn = Instance.new("TextButton")
+    aBtn.Name = "AToggle"
+    aBtn.Size = UDim2.new(0, 30, 0, 30)
+    aBtn.Position = UDim2.new(1, -140, 0, 5)
+    aBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+    aBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    aBtn.Font = Enum.Font.GothamBold
+    aBtn.TextSize = 16
+    aBtn.Text = "A"
+    aBtn.AutoButtonColor = true
+    aBtn.Parent = mainFrame
+    Instance.new("UICorner", aBtn).CornerRadius = UDim.new(0, 8)
 
-    -- Кнопка «A» — сильная прозрачность (почти невидимый HUD)
-    alphaBtn = Instance.new("TextButton")
-    alphaBtn.Name = "AlphaToggle"
-    alphaBtn.Size = UDim2.new(0, 30, 0, 30)
-    alphaBtn.Position = UDim2.new(1, -176, 0, 5)
-    alphaBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
-    alphaBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    alphaBtn.Font = Enum.Font.GothamBold
-    alphaBtn.TextSize = 16
-    alphaBtn.Text = "A"
-    alphaBtn.AutoButtonColor = true
-    alphaBtn.Parent = mainFrame
-    Instance.new("UICorner", alphaBtn).CornerRadius = UDim.new(0, 8)
-
-    -- Применение текущего уровня прозрачности HUD.
-    -- normal — обычный вид; P — чуть прозрачнее обычного; A — сильно прозрачный.
-    local function applyHudAlpha()
+    -- Применение текущего режима HUD (normal / A / P).
+    -- normal — обычный вид, окно перетаскивается;
+    -- A      — закреплено, фон абсолютно чёрный и непрозрачный (текст максимально читаем);
+    -- P      — закреплено, фон чуть прозрачнее обычного (полупрозрачный тёмный).
+    applyHudMode = function()
         if not mainFrame then return end
-        local bgT, txtT, strokeT
-        if hudAlpha == "alpha" then
-            bgT, txtT, strokeT = 0.92, 0.8, 0.9
-        elseif hudAlpha == "ghost" then
-            bgT, txtT, strokeT = 0.5, 0.4, 0.6
+        local bgC, bgT, txtT, strokeT
+        if hudMode == "A" then
+            bgC, bgT, txtT, strokeT = Color3.fromRGB(0, 0, 0), 0, 0, 0.4
+        elseif hudMode == "P" then
+            bgC, bgT, txtT, strokeT = Color3.fromRGB(15, 15, 20), 0.35, 0.15, 0.5
         else
-            bgT, txtT, strokeT = (pinned and 0 or 0.15), 0, 0.4
+            bgC, bgT, txtT, strokeT = Color3.fromRGB(20, 20, 25), 0.15, 0, 0.4
         end
+        pinned = (hudMode ~= "normal")
+        pcall(function() mainFrame.BackgroundColor3 = bgC end)
         pcall(function() mainFrame.BackgroundTransparency = bgT end)
         for _, lbl in ipairs({ titleLbl, pilotsLabel, crashLogLabel }) do
             if lbl then pcall(function() lbl.TextTransparency = txtT end) end
@@ -614,23 +611,39 @@ buildGuiContents = function()
         local lt = mainFrame:FindFirstChild("LogTitle")
         if lt then pcall(function() lt.TextTransparency = txtT end) end
         local strokeInst = mainFrame:FindFirstChild("Border")
-        if strokeInst then pcall(function() strokeInst.Transparency = strokeT end) end
-        if ghostBtn then pcall(function() ghostBtn.Text = (hudAlpha == "ghost") and "p" or "P" end) end
-        if alphaBtn then pcall(function() alphaBtn.Text = (hudAlpha == "alpha") and "a" or "A" end) end
+        if strokeInst then
+            pcall(function() strokeInst.Transparency = strokeT end)
+            pcall(function()
+                strokeInst.Color = pinned and Color3.fromRGB(90, 90, 90) or Color3.fromRGB(220, 40, 40)
+            end)
+        end
+        if aBtn then pcall(function() aBtn.Text = (hudMode == "A") and "a" or "A" end) end
+        if pBtn then pcall(function() pBtn.Text = (hudMode == "P") and "p" or "P" end) end
+        setInputPassThrough(pinned)
     end
 
-    ghostBtn.MouseButton1Click:Connect(function()
-        hudAlpha = (hudAlpha == "ghost") and "normal" or "ghost"
-        local ok, err = pcall(applyHudAlpha)
-        if not ok then warn("[Spectator] Alpha mode error:", err) end
-        print("[Spectator] Прозрачность HUD:", hudAlpha)
-    end)
+    -- Переключение режимов: normal -> A -> P -> normal (кнопкой A)
+    togglePinMode = function(mode)
+        hudMode = mode
+        local ok, err = pcall(applyHudMode)
+        if not ok then warn("[Spectator] Mode error:", err) end
+        if mode == "A" then
+            print("[Spectator] Закреплено (A): окно неподвижно, фон чёрный непрозрачный, клики сквозь HUD.")
+        elseif mode == "P" then
+            print("[Spectator] Закреплено (P): окно неподвижно, фон чуть прозрачнее обычного, клики сквозь HUD.")
+        else
+            print("[Spectator] HUD откреплён: окно снова перемещаемое.")
+        end
+    end
 
-    alphaBtn.MouseButton1Click:Connect(function()
-        hudAlpha = (hudAlpha == "alpha") and "normal" or "alpha"
-        local ok, err = pcall(applyHudAlpha)
-        if not ok then warn("[Spectator] Alpha mode error:", err) end
-        print("[Spectator] Прозрачность HUD:", hudAlpha)
+    aBtn.MouseButton1Click:Connect(function()
+        if hudMode == "normal" then
+            togglePinMode("A")
+        elseif hudMode == "A" then
+            togglePinMode("P")
+        else
+            togglePinMode("normal")
+        end
     end)
 
     -- Кнопка справки "?" — содержимое окна HELP будет заполнено позже.
@@ -712,52 +725,26 @@ buildGuiContents = function()
         helpWindow.Visible = true
     end)
 
-    -- Кнопка закрепления (pin): в закреплённом режиме окно не двигается,
-    -- фон становится чёрным и непрозрачным, клики проходят сквозь HUD.
-    pinBtn = Instance.new("TextButton")
-    pinBtn.Name = "PinToggle"
-    pinBtn.Size = UDim2.new(0, 30, 0, 30)
-    pinBtn.Position = UDim2.new(1, -104, 0, 5)
-    pinBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
-    pinBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    pinBtn.Font = Enum.Font.GothamBold
-    pinBtn.TextSize = 16
-    pinBtn.Text = pinned and "U" or "P"
-    pinBtn.AutoButtonColor = true
-    pinBtn.Parent = mainFrame
-    Instance.new("UICorner", pinBtn).CornerRadius = UDim.new(0, 8)
+    -- Кнопка «P» — закрепить окно + фон ЧУТЬ прозрачнее обычного.
+    pBtn = Instance.new("TextButton")
+    pBtn.Name = "PToggle"
+    pBtn.Size = UDim2.new(0, 30, 0, 30)
+    pBtn.Position = UDim2.new(1, -104, 0, 5)
+    pBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+    pBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    pBtn.Font = Enum.Font.GothamBold
+    pBtn.TextSize = 16
+    pBtn.Text = "P"
+    pBtn.AutoButtonColor = true
+    pBtn.Parent = mainFrame
+    Instance.new("UICorner", pBtn).CornerRadius = UDim.new(0, 8)
 
-    local function applyPinMode()
-        if pinned then
-            mainFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-            mainFrame.BackgroundTransparency = 0
-            local strokeInst = mainFrame:FindFirstChild("Border")
-            if strokeInst then pcall(function() strokeInst.Color = Color3.fromRGB(90, 90, 90) end) end
-            if titleLbl then pcall(function() titleLbl.TextTransparency = 0 end) end
-            setInputPassThrough(true)
-            pinBtn.Text = "U"
-            print("[Spectator] HUD закреплён: окно неподвижно, фон чёрный, клики сквозь HUD.")
+    pBtn.MouseButton1Click:Connect(function()
+        if hudMode == "P" then
+            togglePinMode("normal")
         else
-            mainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
-            mainFrame.BackgroundTransparency = 0.15
-            local strokeInst = mainFrame:FindFirstChild("Border")
-            if strokeInst then pcall(function() strokeInst.Color = Color3.fromRGB(220, 40, 40) end) end
-            if titleLbl then pcall(function() titleLbl.TextTransparency = 0 end) end
-            setInputPassThrough(false)
-            pinBtn.Text = "P"
-            print("[Spectator] HUD откреплён: окно снова перемещаемое.")
+            togglePinMode("P")
         end
-        -- После смены пина переприменяем уровень прозрачности (P/A), если он активен,
-        -- чтобы он не «затирался» настройками пина.
-        if hudAlpha ~= "normal" then
-            pcall(applyHudAlpha)
-        end
-    end
-
-    pinBtn.MouseButton1Click:Connect(function()
-        pinned = not pinned
-        local ok, err = pcall(applyPinMode)
-        if not ok then warn("[Spectator] Pin mode error:", err) end
     end)
 
     hideBtn.MouseButton1Click:Connect(function()
@@ -988,7 +975,7 @@ spawn(function()
             gui = g
                 pcall(buildGuiContents) -- пересобрать содержимое окна
         -- После пересборки восстанавливаем активный режим прозрачности (P/A)
-        if hudAlpha ~= "normal" then pcall(applyHudAlpha) end
+        if hudMode ~= "normal" then pcall(applyHudMode) end
         print("[Spectator] HUD пересоздан через: " .. entry.name)
             break
         end
