@@ -108,6 +108,7 @@ local CONFIG = {
     SHOW_LOCAL_PLAYER = true,      -- показывать и себя тоже
     DEBUG_LOG = false,             -- печатать в консоль найденные машины (для отладки)
     MAX_LOG_ENTRIES = 50,          -- сколько записей об авариях хранить
+    WARMUP_SECONDS = 3,            -- секунд после START, в течение которых статусы не начисляются
     WEBHOOK_ENABLED = false,       -- включить отправку логов на Discord Webhook
     WEBHOOK_URL = "",              -- вставьте URL вашего Discord webhook сюда
 }
@@ -118,6 +119,7 @@ local CONFIG = {
 local PilotData = {}      -- [userId] = таблица состояния
 local CrashLog = {}       -- массив событий аварий/DNF
 local monitoring = false  -- мониторинг запускается кнопкой START (не на старте)
+local monitorStartTick = 0 -- os.time() момента нажатия START (прогрев против ложных DNF)
 local CarCache = {}       -- [userId] = {model, time}
 local DescendantsCache = nil
 local DescendantsCacheTime = 0
@@ -330,6 +332,9 @@ end
 
 local function updatePilotData()
     if not monitoring then return end
+    -- Прогрев после START: данные собираем, но статусы (CRASH/DNF) не начисляем,
+    -- чтобы пилоты в боксах / на стартовой решётке не показывались DNF сразу.
+    local warmup = (os.time() - monitorStartTick) < CONFIG.WARMUP_SECONDS
     local seen = {}
 
     for _, plr in ipairs(Players:GetPlayers()) do
@@ -368,6 +373,11 @@ local function updatePilotData()
                     data.StalledSince = nil
                 end
 
+                -- Во время прогрева статусы не начисляем (только собираем скорость/позиции)
+                if warmup then
+                    data.StalledSince = nil
+                else
+
                 local lowHealth = health ~= nil and health < CONFIG.CRASH_DAMAGE_THRESHOLD
 
                 -- Краш: был быстрый -> резко встал + здоровье просело
@@ -395,6 +405,8 @@ local function updatePilotData()
                     data.DNF = false
                     data.StalledSince = nil
                 end
+
+                end -- warmup if/else
             end
         end
     end
@@ -662,6 +674,7 @@ buildGuiContents = function()
     startBtn.MouseButton1Click:Connect(function()
         monitoring = not monitoring
         resetMonitoring()
+        if monitoring then monitorStartTick = os.time() end
         updateStartBtn()
         if monitoring then
             pcall(function()
@@ -728,6 +741,8 @@ end
 local function refreshGui()
     if not pilotsLabel then return end
 
+    -- Список пилотов обновляется ТОЛЬКО при активном мониторинге (кнопка START).
+    -- Иначе на экране остаётся подсказка — никаких ложных DNF до запуска.
     if not monitoring then
         setRich(pilotsLabel,
             '<font color="#ffcc00">Нажмите START MONITORING,</font>\n<font color="#ffcc00">чтобы начать наблюдение.</font>',
@@ -738,6 +753,16 @@ local function refreshGui()
             table.insert(logLines, ("%s | %s [%s]"):format(formatTime(ev.Time), ev.Name, ev.Type or "CRASH"))
         end
         crashLogLabel.Text = (#logLines > 0) and table.concat(logLines, "\n") or ""
+        return
+    end
+
+    -- Прогрев: первые секунды после START список не рисуем,
+    -- чтобы никто не успел получить статус DNF/STOP «на пустом месте».
+    if os.time() - monitorStartTick < CONFIG.WARMUP_SECONDS then
+        setRich(pilotsLabel,
+            '<font color="#44dd66">Мониторинг запущен. Прогрев ' ..
+            tostring(CONFIG.WARMUP_SECONDS - (os.time() - monitorStartTick)) .. 'с...</font>',
+            "Мониторинг запущен. Прогрев...")
         return
     end
 

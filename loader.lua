@@ -1,5 +1,5 @@
 ------------------------------------------------------------
--- Formula Apex Spectator — лоадер v2 для Xeno (1.3.6 / 1.6+)
+-- Formula Apex Spectator — лоадер v3 для Xeno (1.3.6 / 1.6+)
 --
 -- Вставьте в Xeno ОДНУ строку и нажмите Execute:
 --
@@ -8,13 +8,16 @@ loadstring(game:HttpGet("https://raw.githubusercontent.com/kapralchiknn1/formula
 -- Что делает этот лоадер:
 --   1. Проверяет, что вы находитесь в игре Formula Apex (не в лобби Roblox).
 --   2. Скачивает актуальный main.lua с GitHub (с повторными попытками).
+--      К ссылке добавляется cache-buster (?v=...), чтобы всегда получать
+--      свежую версию сразу после push, минуя кэш raw-CDN GitHub.
 --   3. Показывает статус загрузки через onnotify (Xeno) / чат / warn.
 --   4. Защищает от пустого/ битого ответа raw-ссылки.
 ------------------------------------------------------------
 
 local REPO_RAW = "https://raw.githubusercontent.com/kapralchiknn1/formulaapexspectator/main/"
-local SCRIPT_URL = REPO_RAW .. "main.lua"
-local VERSION = "loader-v2"
+local LOADER_BUILD = "2026-10-10-3" -- обновляется вместе с main.lua
+local SCRIPT_URL = REPO_RAW .. "main.lua?cb=" .. LOADER_BUILD .. "-" .. tostring(math.random(100000, 999999))
+local VERSION = "loader-v3"
 
 ------------------------------------------------------------
 -- Уведомления (Xeno-совместимые)
@@ -112,4 +115,5 @@ if not runOk then
     notify("Ошибка при запуске скрипта: " .. tostring(runErr), 8)
 else
     notify("Formula Apex Spectator активен. HUD должен появиться на экране.", 4)
+    notify("Далее: нажмите START MONITORING в окне — до этого DNF не начисляются.", 6)
 end
