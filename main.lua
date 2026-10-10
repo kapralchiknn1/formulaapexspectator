@@ -423,7 +423,10 @@ end
 -- GUI (HUD)
 ------------------------------------------------------------
 local gui, mainFrame, pilotsLabel, crashLogLabel, hideBtn, collapsed = nil, nil, nil, nil, nil, false
-local pinBtn, clearBtn, pinned = nil, nil, false
+local pinBtn, clearBtn, helpBtn, ghostBtn = nil, nil, nil, nil
+local pinned, ghostMode = false, false
+local helpWindow, helpVisible = nil, false
+local HEADER_H = 40 -- высота шапки HUD (с кнопками)
 local startBtn = nil
 local titleLbl = nil
 
@@ -536,20 +539,21 @@ buildGuiContents = function()
 
     titleLbl = Instance.new("TextLabel")
     titleLbl.Name = "Title"
-    titleLbl.Size = UDim2.new(1, -50, 0, 40)
-    titleLbl.Position = UDim2.new(0, 0, 0, 0)
+    titleLbl.Size = UDim2.new(1, -160, 0, 40)
+    titleLbl.Position = UDim2.new(0, 16, 0, 0)
     titleLbl.BackgroundTransparency = 1
     titleLbl.Font = Enum.Font.GothamBold
     titleLbl.TextSize = 20
     titleLbl.TextColor3 = Color3.fromRGB(255, 70, 70)
+    titleLbl.TextXAlignment = Enum.TextXAlignment.Left
     titleLbl.Text = "FORMULA APEX | SPECTATOR"
     titleLbl.Parent = mainFrame
 
     -- Кнопка скрытия/показа HUD
     hideBtn = Instance.new("TextButton")
     hideBtn.Name = "HideToggle"
-    hideBtn.Size = UDim2.new(0, 34, 0, 34)
-    hideBtn.Position = UDim2.new(1, -40, 0, 3)
+    hideBtn.Size = UDim2.new(0, 30, 0, 30)
+    hideBtn.Position = UDim2.new(1, -36, 0, 5)
     hideBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
     hideBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
     hideBtn.Font = Enum.Font.GothamBold
@@ -559,12 +563,138 @@ buildGuiContents = function()
     hideBtn.Parent = mainFrame
     Instance.new("UICorner", hideBtn).CornerRadius = UDim.new(0, 8)
 
+    -- Кнопка «призрачного» режима: HUD становится сильно прозрачным
+    -- (фон и текст полупрозрачные), но окно остаётся на месте и кликается.
+    ghostBtn = Instance.new("TextButton")
+    ghostBtn.Name = "GhostToggle"
+    ghostBtn.Size = UDim2.new(0, 30, 0, 30)
+    ghostBtn.Position = UDim2.new(1, -140, 0, 5)
+    ghostBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+    ghostBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    ghostBtn.Font = Enum.Font.GothamBold
+    ghostBtn.TextSize = 16
+    ghostBtn.Text = "G"
+    ghostBtn.AutoButtonColor = true
+    ghostBtn.Parent = mainFrame
+    Instance.new("UICorner", ghostBtn).CornerRadius = UDim.new(0, 8)
+
+    local function applyGhostMode()
+        if ghostMode then
+            mainFrame.BackgroundTransparency = 0.75
+            for _, lbl in ipairs({ titleLbl, pilotsLabel, crashLogLabel }) do
+                if lbl then pcall(function() lbl.TextTransparency = 0.6 end) end
+            end
+            local lt = mainFrame:FindFirstChild("LogTitle")
+            if lt then pcall(function() lt.TextTransparency = 0.6 end) end
+            local strokeInst = mainFrame:FindFirstChild("Border")
+            if strokeInst then pcall(function() strokeInst.Transparency = 0.75 end) end
+            ghostBtn.Text = "g"
+            print("[Spectator] Призрачный режим ВКЛ: HUD сильно прозрачный.")
+        else
+            mainFrame.BackgroundTransparency = pinned and 0 or 0.15
+            for _, lbl in ipairs({ titleLbl, pilotsLabel, crashLogLabel }) do
+                if lbl then pcall(function() lbl.TextTransparency = 0 end) end
+            end
+            local lt = mainFrame:FindFirstChild("LogTitle")
+            if lt then pcall(function() lt.TextTransparency = 0 end) end
+            local strokeInst = mainFrame:FindFirstChild("Border")
+            if strokeInst then pcall(function() strokeInst.Transparency = 0.4 end) end
+            ghostBtn.Text = "G"
+            print("[Spectator] Призрачный режим ВЫКЛ.")
+        end
+    end
+
+    ghostBtn.MouseButton1Click:Connect(function()
+        ghostMode = not ghostMode
+        local ok, err = pcall(applyGhostMode)
+        if not ok then warn("[Spectator] Ghost mode error:", err) end
+    end)
+
+    -- Кнопка справки "?" — содержимое окна HELP будет заполнено позже.
+    helpBtn = Instance.new("TextButton")
+    helpBtn.Name = "HelpBtn"
+    helpBtn.Size = UDim2.new(0, 30, 0, 30)
+    helpBtn.Position = UDim2.new(1, -176, 0, 5)
+    helpBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+    helpBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    helpBtn.Font = Enum.Font.GothamBold
+    helpBtn.TextSize = 16
+    helpBtn.Text = "?"
+    helpBtn.AutoButtonColor = true
+    helpBtn.Parent = mainFrame
+    Instance.new("UICorner", helpBtn).CornerRadius = UDim.new(0, 8)
+
+    helpBtn.MouseButton1Click:Connect(function()
+        if helpWindow then
+            helpVisible = not helpVisible
+            helpWindow.Visible = helpVisible
+            return
+        end
+        -- Окно справки (создаётся один раз; текст-заглушка, потом заменим)
+        helpWindow = Instance.new("Frame")
+        helpWindow.Name = "HelpWindow"
+        helpWindow.Size = UDim2.new(0, 300, 0, 180)
+        helpWindow.Position = UDim2.new(0.5, -150, 0.5, -90)
+        helpWindow.BackgroundColor3 = Color3.fromRGB(25, 25, 32)
+        helpWindow.BorderSizePixel = 0
+        helpWindow.Active = true
+        helpWindow.Draggable = true
+        helpWindow.Parent = gui
+        Instance.new("UICorner", helpWindow).CornerRadius = UDim.new(0, 10)
+
+        local helpTitle = Instance.new("TextLabel")
+        helpTitle.Name = "HelpTitle"
+        helpTitle.Size = UDim2.new(1, -60, 0, 30)
+        helpTitle.Position = UDim2.new(0, 12, 0, 4)
+        helpTitle.BackgroundTransparency = 1
+        helpTitle.Font = Enum.Font.GothamBold
+        helpTitle.TextSize = 16
+        helpTitle.TextColor3 = Color3.fromRGB(120, 200, 255)
+        helpTitle.TextXAlignment = Enum.TextXAlignment.Left
+        helpTitle.Text = "HELP"
+        helpTitle.Parent = helpWindow
+
+        local helpClose = Instance.new("TextButton")
+        helpClose.Name = "HelpClose"
+        helpClose.Size = UDim2.new(0, 24, 0, 24)
+        helpClose.Position = UDim2.new(1, -30, 0, 4)
+        helpClose.BackgroundColor3 = Color3.fromRGB(70, 40, 40)
+        helpClose.TextColor3 = Color3.fromRGB(255, 255, 255)
+        helpClose.Font = Enum.Font.GothamBold
+        helpClose.TextSize = 14
+        helpClose.Text = "x"
+        helpClose.AutoButtonColor = true
+        helpClose.Parent = helpWindow
+        Instance.new("UICorner", helpClose).CornerRadius = UDim.new(0, 6)
+        helpClose.MouseButton1Click:Connect(function()
+            helpVisible = false
+            helpWindow.Visible = false
+        end)
+
+        local helpText = Instance.new("TextLabel")
+        helpText.Name = "HelpText"
+        helpText.Size = UDim2.new(1, -24, 1, -44)
+        helpText.Position = UDim2.new(0, 12, 0, 38)
+        helpText.BackgroundTransparency = 1
+        helpText.Font = Enum.Font.Code
+        helpText.TextSize = 13
+        helpText.TextColor3 = Color3.fromRGB(230, 230, 230)
+        helpText.TextXAlignment = Enum.TextXAlignment.Left
+        helpText.TextYAlignment = Enum.TextYAlignment.Top
+        helpText.TextWrapped = true
+        helpText.Text = "Help window placeholder.\n(Text will be added later.)"
+        helpText.Parent = helpWindow
+
+        helpVisible = true
+        helpWindow.Visible = true
+    end)
+
     -- Кнопка закрепления (pin): в закреплённом режиме окно не двигается,
     -- фон становится чёрным и непрозрачным, клики проходят сквозь HUD.
     pinBtn = Instance.new("TextButton")
     pinBtn.Name = "PinToggle"
-    pinBtn.Size = UDim2.new(0, 34, 0, 34)
-    pinBtn.Position = UDim2.new(1, -78, 0, 3)
+    pinBtn.Size = UDim2.new(0, 30, 0, 30)
+    pinBtn.Position = UDim2.new(1, -104, 0, 5)
     pinBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
     pinBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
     pinBtn.Font = Enum.Font.GothamBold
@@ -605,7 +735,7 @@ buildGuiContents = function()
     hideBtn.MouseButton1Click:Connect(function()
         collapsed = not collapsed
         if collapsed then
-            mainFrame.Size = UDim2.new(0, 380, 0, 40)
+            mainFrame.Size = UDim2.new(0, 380, 0, HEADER_H)
             pilotsLabel.Visible = false
             crashLogLabel.Visible = false
             local lt = mainFrame:FindFirstChild("LogTitle")
