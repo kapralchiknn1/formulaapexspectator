@@ -403,6 +403,28 @@ end
 -- GUI (HUD)
 ------------------------------------------------------------
 local gui, mainFrame, pilotsLabel, crashLogLabel, hideBtn, collapsed = nil, nil, nil, nil, nil, false
+local pinBtn, clearBtn, pinned = nil, nil, false
+local titleLbl = nil
+
+-- Кликабельность HUD: пробуем отключить блокировку кликов через
+-- InputBegan/TouchBegan (свойства VisibleClipsDown и т.п. не помогают —
+-- Roblox всё равно перехватывает клики над GUI). Если способ недоступен
+-- в исполнителе — просто делаем фон полностью прозрачным.
+local function setInputPassThrough(enabled)
+    if not mainFrame then return end
+    pcall(function()
+        for _, connName in ipairs({ "InputBegan", "MouseEnter" }) do
+            local okGet, getConn = pcall(function()
+                return mainFrame[connName] and mainFrame[connName]:GetConnections()
+            end)
+            if okGet and type(getConn) == "table" then
+                for _, c in ipairs(getConn) do
+                    pcall(function() c:Disconnect() end)
+                end
+            end
+        end
+    end)
+end
 
 -- Безопасная установка RichText: если исполнитель не поддерживает HTML-теги,
 -- включаем обычный текст (иначе <font color="..."> показывается как код).
@@ -440,21 +462,22 @@ local function createGui()
     Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 10)
 
     local stroke = Instance.new("UIStroke")
+    stroke.Name = "Border"
     stroke.Color = Color3.fromRGB(220, 40, 40)
     stroke.Thickness = 2
     stroke.Transparency = 0.4
     stroke.Parent = mainFrame
 
-    local title = Instance.new("TextLabel")
-    title.Name = "Title"
-    title.Size = UDim2.new(1, -50, 0, 40)
-    title.Position = UDim2.new(0, 0, 0, 0)
-    title.BackgroundTransparency = 1
-    title.Font = Enum.Font.GothamBold
-    title.TextSize = 20
-    title.TextColor3 = Color3.fromRGB(255, 70, 70)
-    title.Text = "FORMULA APEX | SPECTATOR"
-    title.Parent = mainFrame
+    titleLbl = Instance.new("TextLabel")
+    titleLbl.Name = "Title"
+    titleLbl.Size = UDim2.new(1, -50, 0, 40)
+    titleLbl.Position = UDim2.new(0, 0, 0, 0)
+    titleLbl.BackgroundTransparency = 1
+    titleLbl.Font = Enum.Font.GothamBold
+    titleLbl.TextSize = 20
+    titleLbl.TextColor3 = Color3.fromRGB(255, 70, 70)
+    titleLbl.Text = "FORMULA APEX | SPECTATOR"
+    titleLbl.Parent = mainFrame
 
     -- Кнопка скрытия/показа HUD
     hideBtn = Instance.new("TextButton")
@@ -469,6 +492,57 @@ local function createGui()
     hideBtn.AutoButtonColor = true
     hideBtn.Parent = mainFrame
     Instance.new("UICorner", hideBtn).CornerRadius = UDim.new(0, 8)
+
+    -- Кнопка закрепления (pin): в закреплённом режиме окно не двигается,
+    -- фон полностью прозрачен и клики проходят сквозь HUD.
+    pinBtn = Instance.new("TextButton")
+    pinBtn.Name = "PinToggle"
+    pinBtn.Size = UDim2.new(0, 34, 0, 34)
+    pinBtn.Position = UDim2.new(1, -78, 0, 3)
+    pinBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+    pinBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    pinBtn.Font = Enum.Font.GothamBold
+    pinBtn.TextSize = 16
+    pinBtn.Text = "📌"
+    pinBtn.AutoButtonColor = true
+    pinBtn.Parent = mainFrame
+    Instance.new("UICorner", pinBtn).CornerRadius = UDim.new(0, 8)
+
+    local function applyPinMode()
+        if pinned then
+            mainFrame.Draggable = false
+            setInputPassThrough(true)
+            for _, obj in ipairs(mainFrame:GetDescendants()) do
+                if (obj:IsA("TextLabel") or obj:IsA("Frame")) and obj.Name ~= "Title" then
+                    pcall(function() obj.BackgroundTransparency = 1 end)
+                elseif obj:IsA("UIStroke") and obj.Name == "Border" then
+                    pcall(function() obj.Transparency = 0.75 end)
+                end
+            end
+            mainFrame.BackgroundTransparency = 1
+            pilotsLabel.BackgroundTransparency = 1
+            crashLogLabel.BackgroundTransparency = 1
+            if titleLbl then pcall(function() titleLbl.TextTransparency = 0.35 end) end
+            pinBtn.Text = "🔓"
+            print("[Spectator] HUD закреплён: окно не двигается, фон прозрачный.")
+        else
+            mainFrame.Draggable = true
+            mainFrame.BackgroundTransparency = 0.15
+            pilotsLabel.BackgroundTransparency = 1
+            crashLogLabel.BackgroundTransparency = 1
+            if titleLbl then pcall(function() titleLbl.TextTransparency = 0 end) end
+            local strokeInst = mainFrame:FindFirstChild("Border")
+            if strokeInst then pcall(function() strokeInst.Transparency = 0.4 end) end
+            pinBtn.Text = "📌"
+            print("[Spectator] HUD откреплён: окно снова перемещаемое с фоном.")
+        end
+    end
+
+    pinBtn.MouseButton1Click:Connect(function()
+        pinned = not pinned
+        local ok, err = pcall(applyPinMode)
+        if not ok then warn("[Spectator] Pin mode error:", err) end
+    end)
 
     hideBtn.MouseButton1Click:Connect(function()
         collapsed = not collapsed
@@ -515,6 +589,26 @@ local function createGui()
     logTitle.TextXAlignment = Enum.TextXAlignment.Left
     logTitle.Text = "Crash / DNF Log:"
     logTitle.Parent = mainFrame
+
+    -- Кнопка очистки логов аварий
+    clearBtn = Instance.new("TextButton")
+    clearBtn.Name = "ClearLog"
+    clearBtn.Size = UDim2.new(0, 74, 0, 22)
+    clearBtn.Position = UDim2.new(1, -86, 0, 281)
+    clearBtn.BackgroundColor3 = Color3.fromRGB(60, 40, 40)
+    clearBtn.TextColor3 = Color3.fromRGB(255, 200, 200)
+    clearBtn.Font = Enum.Font.GothamBold
+    clearBtn.TextSize = 12
+    clearBtn.Text = "CLEAR"
+    clearBtn.AutoButtonColor = true
+    clearBtn.Parent = mainFrame
+    Instance.new("UICorner", clearBtn).CornerRadius = UDim.new(0, 6)
+
+    clearBtn.MouseButton1Click:Connect(function()
+        for i = #CrashLog, 1, -1 do CrashLog[i] = nil end
+        pcall(function() crashLogLabel.Text = "Логи очищены" end)
+        print("[Spectator] Crash/DNF логи очищены.")
+    end)
 
     crashLogLabel = Instance.new("TextLabel")
     crashLogLabel.Name = "CrashLog"
