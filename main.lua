@@ -53,6 +53,9 @@ local CONFIG = {
     REFRESH_INTERVAL = 0.5,        -- как часто обновлять список пилотов
     CRASH_SPEED_THRESHOLD = 5,     -- порог скорости (stud/s), ниже которого считаем что машина стоит после удара
     CRASH_DAMAGE_THRESHOLD = 70,   -- если здоровье машины ниже этого % — считаем её разбитой
+    STALLED_AFTER_SECONDS = 12,    -- машина стоит слишком долго без здоровья -> DNF
+    SHOW_LOCAL_PLAYER = true,      -- показывать и себя тоже
+    DEBUG_LOG = false,             -- печатать в консоль найденные машины/ошибки поиска
     MAX_LOG_ENTRIES = 50,          -- сколько записей об авариях хранить
     WEBHOOK_ENABLED = false,       -- включить отправку логов на Discord Webhook (нужен включённый HTTP в Xeno)
     WEBHOOK_URL = "",              -- вставьте URL вашего Discord webhook сюда
@@ -68,46 +71,145 @@ local StartedAt = os.time()
 ------------------------------------------------------------
 -- Утилиты
 ------------------------------------------------------------
+------------------------------------------------------------
+-- Глобальный поиск машин (нужен, чтобы видеть пилотов даже
+-- когда они не загрузились в стриминг-буфер вокруг вас)
+------------------------------------------------------------
+local DESCENDANTS_CACHE = nil
+local DESCENDANTS_CACHE_TIME = 0
+local DESCENDANTS_CACHE_TTL = 5 -- секунд; GetDescendants() дорогая операция
+
+local function getAllModels()
+    local now = os.clock()
+    if DESCENDANTS_CACHE and (now - DESCENDANTS_CACHE_TIME) < DESCENDANTS_CACHE_TTL then
+        return DESCENDANTS_CACHE
+    end
+    local ok, list = pcall(function() return workspace:GetDescendants() end)
+    if not ok then
+        warn("[Spectator] Не удалось получить список объектов workspace:", list)
+        return {}
+    end
+    local models = {}
+    for _, obj in ipairs(list) do
+        if obj:IsA("Model") then
+            table.insert(models, obj)
+        end
+    end
+    DESCENDANTS_CACHE = models
+    DESCENDANTS_CACHE_TIME = now
+    return models
+end
+
+local function modelBelongsTo(model, plr)
+    -- 1. Атрибуты владельца (частый способ в гоночных играх Roblox)
+    local attrs = { "OwnerUserId", "PlayerUserId", "UserId", "Owner", "Player", "Driver" }
+    for _, key in ipairs(attrs) do
+        local v = model:GetAttribute(key)
+        if v ~= nil then
+            if type(v) == "number" and v == plr.UserId then return true end
+            if type(v) == "string" and (v == plr.Name or tonumber(v) == plr.UserId) then return true end
+            if typeof(v) == "Instance" and v:IsA("Player") and v.UserId == plr.UserId then return true end
+        end
+    end
+    -- 2. Имя модели == имя игрока
+    if model.Name == plr.Name then return true end
+    -- 3. Внутри модели есть часть/значение с именем игрока (например Seat "PlayerName_Sit")
+    local ok, parts = pcall(function() return model:GetChildren() end)
+    if ok then
+        for _, ch in ipairs(parts) do
+            if ch.Name == plr.Name or ch.Name:find(plr.Name, 1, true) then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+local carCache = {} -- [userId] = {model = ..., time = ...}
+
 local function getCarForPlayer(plr)
-    -- Formula Apex обычно хранит болиды игрока в Workspace/Cars или под Character
+    local cached = carCache[plr.UserId]
+    if cached and cached.model and cached.model.Parent and (os.clock() - cached.time < 3) then
+        return cached.model
+    end
+
+    local foundModel = nil
+
+    -- Быстрые проверки сначала: персонаж / стандартные контейнеры
     local char = plr.Character
-    if not char then return nil end
+    if char then
+        local carModel = char:FindFirstChild("Car") or char:FindFirstChild("Vehicle")
+        if carModel then foundModel = carModel end
+        if not foundModel and modelBelongsTo(char, plr) then foundModel = char end
+    end
 
-    -- Вариант 1: модель машины внутри персонажа
-    local carModel = char:FindFirstChild("Car") or char:FindFirstChild("Vehicle")
-    if carModel then return carModel end
+    if not foundModel then
+        for _, containerName in ipairs({ "Cars", "Vehicles", "Racing", "Race", "Grid" }) do
+            local container = workspace:FindFirstChild(containerName)
+            if container then
+                for _, obj in ipairs(container:GetChildren()) do
+                    if obj:IsA("Model") and modelBelongsTo(obj, plr) then
+                        foundModel = obj
+                        break
+                    end
+                end
+            end
+            if foundModel then break end
+        end
+    end
 
-    -- Вариант 2: ищем PrimaryPart / HumanoidRootPart у модели машины в Workspace
-    local workspaceCars = workspace:FindFirstChild("Cars") or workspace:FindFirstChild("Vehicles")
-    if workspaceCars then
-        for _, obj in ipairs(workspaceCars:GetChildren()) do
-            if obj:GetAttribute("OwnerUserId") == plr.UserId
-               or obj.Name == plr.Name
-               or obj:GetAttribute("Player") == plr.Name then
-                return obj
+    if not foundModel then
+        local direct = workspace:FindFirstChild(plr.Name)
+        if direct and direct:IsA("Model") then foundModel = direct end
+    end
+
+    -- Медленная проверка: глобальный обход всех моделей (стриминг-далёкие машины)
+    if not foundModel then
+        for _, model in ipairs(getAllModels()) do
+            if modelBelongsTo(model, plr) then
+                foundModel = model
+                break
             end
         end
     end
 
-    -- Вариант 3: имя модели машины совпадает с именем игрока где-то в workspace
-    local found = workspace:FindFirstChild(plr.Name)
-    if found and found:IsA("Model") then return found end
+    if CONFIG.DEBUG_LOG then
+        print(("[Spectator] %s -> машина: %s"):format(plr.Name, foundModel and foundModel:GetFullName() or "НЕ НАЙДЕНА"))
+    end
 
-    return nil
+    if foundModel then
+        carCache[plr.UserId] = { model = foundModel, time = os.clock() }
+    else
+        carCache[plr.UserId] = nil
+    end
+    return foundModel
 end
 
 local function getCarHealth(carModel)
     if not carModel then return 100 end
     -- Здоровье может быть в атрибуте, в Value, или в Humanoid (если есть)
-    local h = carModel:GetAttribute("Health")
-         or carModel:GetAttribute("Damage")
-    if type(h) == "number" then
-        return math.clamp(100 - (h or 0), 0, 100)
+    local attrNames = { "Health", "HP", "Integrity", "Damage", "BodyHealth" }
+    for _, key in ipairs(attrNames) do
+        local h = carModel:GetAttribute(key)
+        if type(h) == "number" then
+            if key == "Damage" then
+                return math.clamp(100 - h, 0, 100)
+            end
+            -- нормализуем в проценты, если максимум больше 100
+            if h > 100 then return math.clamp(h / 10, 0, 100) end
+            return math.clamp(h, 0, 100)
+        end
     end
 
-    local healthValue = carModel:FindFirstChild("Health") or carModel:FindFirstChild("CarHealth")
-    if healthValue and healthValue:IsA("NumberValue") then
-        return math.clamp(healthValue.Value, 0, 100)
+    local ok, descendants = pcall(function() return carModel:GetDescendants() end)
+    if ok then
+        for _, ch in ipairs(descendants) do
+            if (ch:IsA("NumberValue") or ch:IsA("IntValue")) and (ch.Name == "Health" or ch.Name == "CarHealth" or ch.Name == "HP") then
+                local v = ch.Value
+                if v > 100 then return math.clamp(v / 10, 0, 100) end
+                return math.clamp(v, 0, 100)
+            end
+        end
     end
 
     local hum = carModel:FindFirstChildOfClass("Humanoid")
@@ -124,8 +226,21 @@ local function getCarVelocity(carModel)
         or carModel:FindFirstChild("HumanoidRootPart")
         or carModel:FindFirstChild("Body")
         or carModel:FindFirstChildWhichIsA("BasePart")
+    if not part then
+        -- ищем любую BasePart среди потомков (машина может быть глубоко вложенной)
+        local ok, descendants = pcall(function() return carModel:GetDescendants() end)
+        if ok then
+            for _, ch in ipairs(descendants) do
+                if ch:IsA("BasePart") then part = ch break end
+            end
+        end
+    end
     if part and part:IsA("BasePart") then
-        return part.AssemblyLinearVelocity.Magnitude
+        local v = part.AssemblyLinearVelocity
+        if typeof(v) == "Vector3" then
+            return v.Magnitude
+        end
+        return part.Velocity.Magnitude
     end
     return 0
 end
@@ -174,7 +289,7 @@ local function updatePilotData()
     local seen = {}
 
     for _, plr in ipairs(Players:GetPlayers()) do
-        if plr ~= LocalPlayer then
+        if plr ~= LocalPlayer or CONFIG.SHOW_LOCAL_PLAYER then
             local uid = plr.UserId
             seen[uid] = true
 
@@ -190,7 +305,10 @@ local function updatePilotData()
                     Health = health,
                     LastSpeed = speed,
                     Crashed = false,
+                    DNF = false,
                     CrashTime = nil,
+                    StalledSince = nil,
+                    CarFound = car ~= nil,
                     Car = car,
                 }
                 PilotData[uid] = data
@@ -199,22 +317,41 @@ local function updatePilotData()
                 data.LastSpeed = data.Speed
                 data.Speed = speed
                 data.Health = health
+                data.CarFound = car ~= nil
                 data.Car = car
+
+                -- Заводим "таймер простоя": машина стоит (или не найдена/исчезла)
+                local isStopped = (not car) or (speed < CONFIG.CRASH_SPEED_THRESHOLD)
+                if isStopped then
+                    if not data.StalledSince then data.StalledSince = os.time() end
+                else
+                    data.StalledSince = nil
+                end
 
                 -- Детектор краша: был быстрый, резко встал + здоровье просело
                 local wasFast = data.LastSpeed > CONFIG.CRASH_SPEED_THRESHOLD * 3
-                local isSlowNow = data.Speed < CONFIG.CRASH_SPEED_THRESHOLD
                 local lowHealth = data.Health < CONFIG.CRASH_DAMAGE_THRESHOLD
 
-                if not data.Crashed and wasFast and isSlowNow and lowHealth then
+                if not data.Crashed and wasFast and isStopped and lowHealth then
                     data.Crashed = true
                     data.CrashTime = os.time()
                     addCrashEvent(uid, data.Name)
                 end
 
-                -- Если пилот починился / снова поехал — снимаем статус краша
-                if data.Crashed and (data.Speed > CONFIG.CRASH_SPEED_THRESHOLD * 2 or data.Health >= CONFIG.CRASH_DAMAGE_THRESHOLD) then
+                -- DNF: долго стоит без возможности уехать (машина разбита/исчезла)
+                if not data.DNF and data.StalledSince
+                   and (os.time() - data.StalledSince) >= CONFIG.STALLED_AFTER_SECONDS
+                   and (lowHealth or not car) then
+                    data.DNF = true
+                    table.insert(CrashLog, 1, { Time = os.time(), Uid = uid, Name = data.Name, Type = "DNF" })
+                    while #CrashLog > CONFIG.MAX_LOG_ENTRIES do table.remove(CrashLog) end
+                end
+
+                -- Если пилот починился / снова поехал — снимаем статусы
+                if (data.Crashed or data.DNF) and data.Speed > CONFIG.CRASH_SPEED_THRESHOLD * 2 and data.Health >= CONFIG.CRASH_DAMAGE_THRESHOLD then
                     data.Crashed = false
+                    data.DNF = false
+                    data.StalledSince = nil
                 end
             end
         end
@@ -224,6 +361,7 @@ local function updatePilotData()
     for uid in pairs(PilotData) do
         if not seen[uid] then
             PilotData[uid] = nil
+            carCache[uid] = nil
         end
     end
 end
@@ -332,17 +470,25 @@ local function updateHud()
         table.insert(lines, "<font color='#888888'>Нет данных о пилотах...</font>")
     else
         for _, d in pairs(PilotData) do
-            local statusIcon = d.Crashed and "[АВАРИЯ]" or "[ON TRACK]"
-            local colorTag = d.Crashed and "<font color='#ff4444'>" or "<font color='#44ff88'>"
+            local statusIcon, colorTag
+            if d.DNF then
+                statusIcon, colorTag = "[DNF]", "#ff2222"
+            elseif d.Crashed then
+                statusIcon, colorTag = "[АВАРИЯ]", "#ff4444"
+            elseif not d.CarFound then
+                statusIcon, colorTag = "[НЕТ МАШИНЫ]", "#888888"
+            else
+                statusIcon, colorTag = "[ON TRACK]", "#44ff88"
+            end
             table.insert(lines, string.format(
-                "%s%s</font> %s | Speed: %.0f | HP: %.0f%%\n",
+                "<font color='%s'>%s</font> %s | Speed: %.0f | HP: %.0f%%\n",
                 colorTag, statusIcon, d.Name, d.Speed, d.Health
             ))
         end
     end
     pilotsLabel.Text = table.concat(lines, "")
 
-    -- Лог аварий
+    -- Лог аварий / DNF
     if #CrashLog == 0 then
         crashLogLabel.Text = "-- Лог аварий пуст --"
     else
@@ -350,11 +496,11 @@ local function updateHud()
         for i, ev in ipairs(CrashLog) do
             if i > 8 then break end
             table.insert(logLines, string.format(
-                "[%s] %s — crash\n",
-                formatTime(ev.Time), ev.Name
+                "[%s] %s — %s\n",
+                formatTime(ev.Time), ev.Name, ev.Type or "crash"
             ))
         end
-        crashLogLabel.Text = "Лог аварий:\n" .. table.concat(logLines, "")
+        crashLogLabel.Text = "Лог событий:\n" .. table.concat(logLines, "")
     end
 end
 
