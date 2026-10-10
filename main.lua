@@ -423,15 +423,15 @@ end
 -- GUI (HUD)
 ------------------------------------------------------------
 local gui, mainFrame, pilotsLabel, crashLogLabel, hideBtn, collapsed = nil, nil, nil, nil, nil, false
-local aBtn, pBtn, clearBtn, helpBtn = nil, nil, nil, nil
+local aBtn, pBtn, clearBtn = nil, nil, nil
 local pinned = false
 -- Режимы закрепления окна:
 --   A — закрепление + фон НЕПРОЗРАЧНЫЙ и темнее обычного (текст виден лучше всего)
 --   P — закрепление + фон ЧУТЬ прозрачнее обычного (тоже хорошо читаемо)
 -- hudMode == "normal" — окно не закреплено, обычный вид, перетаскивается.
 local hudMode = "normal"
-local helpWindow, helpVisible = nil, false
 local HEADER_H = 40 -- высота шапки HUD (с кнопками)
+local HUD_W, HUD_H = 380, 440 -- размеры окна (используются при сворачивании)
 local startBtn = nil
 local titleLbl = nil
 
@@ -526,9 +526,12 @@ end
 -- Всё содержимое окна HUD (создаётся/пересобирается целиком)
 local buildGuiContents
 buildGuiContents = function()
+    -- При пересборке удаляем старое окно, иначе на экране появляются дубли
+    if mainFrame then pcall(function() mainFrame:Destroy() end) mainFrame = nil end
+
     mainFrame = Instance.new("Frame")
     mainFrame.Name = "MainFrame"
-    mainFrame.Size = UDim2.new(0, 380, 0, 440)
+    mainFrame.Size = UDim2.new(0, HUD_W, 0, HUD_H)
     mainFrame.Position = UDim2.new(0, 20, 0.5, -220)
     mainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
     mainFrame.BackgroundTransparency = 0.15
@@ -548,12 +551,12 @@ buildGuiContents = function()
 
     titleLbl = Instance.new("TextLabel")
     titleLbl.Name = "Title"
-    -- Размер/шрифт уменьшены, чтобы все кнопки шапки помещались рядом с заголовком
-    titleLbl.Size = UDim2.new(1, -215, 0, 40)
+    -- Размер/шрифт уменьшены, чтобы кнопки шапки (A, P, –) помещались рядом с заголовком
+    titleLbl.Size = UDim2.new(1, -175, 0, 40)
     titleLbl.Position = UDim2.new(0, 12, 0, 0)
     titleLbl.BackgroundTransparency = 1
     titleLbl.Font = Enum.Font.GothamBold
-    titleLbl.TextSize = 15
+    titleLbl.TextSize = 13
     titleLbl.TextColor3 = Color3.fromRGB(255, 70, 70)
     titleLbl.TextXAlignment = Enum.TextXAlignment.Left
     titleLbl.Text = "FORMULA APEX | SPECTATOR"
@@ -568,7 +571,7 @@ buildGuiContents = function()
     hideBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
     hideBtn.Font = Enum.Font.GothamBold
     hideBtn.TextSize = 18
-    hideBtn.Text = "–"
+    hideBtn.Text = "-"
     hideBtn.AutoButtonColor = true
     hideBtn.Parent = mainFrame
     Instance.new("UICorner", hideBtn).CornerRadius = UDim.new(0, 8)
@@ -646,85 +649,6 @@ buildGuiContents = function()
         end
     end)
 
-    -- Кнопка справки "?" — содержимое окна HELP будет заполнено позже.
-    helpBtn = Instance.new("TextButton")
-    helpBtn.Name = "HelpBtn"
-    helpBtn.Size = UDim2.new(0, 30, 0, 30)
-    helpBtn.Position = UDim2.new(1, -212, 0, 5)
-    helpBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
-    helpBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    helpBtn.Font = Enum.Font.GothamBold
-    helpBtn.TextSize = 16
-    helpBtn.Text = "?"
-    helpBtn.AutoButtonColor = true
-    helpBtn.Parent = mainFrame
-    Instance.new("UICorner", helpBtn).CornerRadius = UDim.new(0, 8)
-
-    helpBtn.MouseButton1Click:Connect(function()
-        if helpWindow then
-            helpVisible = not helpVisible
-            helpWindow.Visible = helpVisible
-            return
-        end
-        -- Окно справки (создаётся один раз; текст-заглушка, потом заменим)
-        helpWindow = Instance.new("Frame")
-        helpWindow.Name = "HelpWindow"
-        helpWindow.Size = UDim2.new(0, 300, 0, 180)
-        helpWindow.Position = UDim2.new(0.5, -150, 0.5, -90)
-        helpWindow.BackgroundColor3 = Color3.fromRGB(25, 25, 32)
-        helpWindow.BorderSizePixel = 0
-        helpWindow.Active = true
-        helpWindow.Draggable = true
-        helpWindow.Parent = gui
-        Instance.new("UICorner", helpWindow).CornerRadius = UDim.new(0, 10)
-
-        local helpTitle = Instance.new("TextLabel")
-        helpTitle.Name = "HelpTitle"
-        helpTitle.Size = UDim2.new(1, -60, 0, 30)
-        helpTitle.Position = UDim2.new(0, 12, 0, 4)
-        helpTitle.BackgroundTransparency = 1
-        helpTitle.Font = Enum.Font.GothamBold
-        helpTitle.TextSize = 16
-        helpTitle.TextColor3 = Color3.fromRGB(120, 200, 255)
-        helpTitle.TextXAlignment = Enum.TextXAlignment.Left
-        helpTitle.Text = "HELP"
-        helpTitle.Parent = helpWindow
-
-        local helpClose = Instance.new("TextButton")
-        helpClose.Name = "HelpClose"
-        helpClose.Size = UDim2.new(0, 24, 0, 24)
-        helpClose.Position = UDim2.new(1, -30, 0, 4)
-        helpClose.BackgroundColor3 = Color3.fromRGB(70, 40, 40)
-        helpClose.TextColor3 = Color3.fromRGB(255, 255, 255)
-        helpClose.Font = Enum.Font.GothamBold
-        helpClose.TextSize = 14
-        helpClose.Text = "x"
-        helpClose.AutoButtonColor = true
-        helpClose.Parent = helpWindow
-        Instance.new("UICorner", helpClose).CornerRadius = UDim.new(0, 6)
-        helpClose.MouseButton1Click:Connect(function()
-            helpVisible = false
-            helpWindow.Visible = false
-        end)
-
-        local helpText = Instance.new("TextLabel")
-        helpText.Name = "HelpText"
-        helpText.Size = UDim2.new(1, -24, 1, -44)
-        helpText.Position = UDim2.new(0, 12, 0, 38)
-        helpText.BackgroundTransparency = 1
-        helpText.Font = Enum.Font.Code
-        helpText.TextSize = 13
-        helpText.TextColor3 = Color3.fromRGB(230, 230, 230)
-        helpText.TextXAlignment = Enum.TextXAlignment.Left
-        helpText.TextYAlignment = Enum.TextYAlignment.Top
-        helpText.TextWrapped = true
-        helpText.Text = "Help window placeholder.\n(Text will be added later.)"
-        helpText.Parent = helpWindow
-
-        helpVisible = true
-        helpWindow.Visible = true
-    end)
-
     -- Кнопка «P» — закрепить окно + фон ЧУТЬ прозрачнее обычного.
     pBtn = Instance.new("TextButton")
     pBtn.Name = "PToggle"
@@ -750,7 +674,7 @@ buildGuiContents = function()
     hideBtn.MouseButton1Click:Connect(function()
         collapsed = not collapsed
         if collapsed then
-            mainFrame.Size = UDim2.new(0, 380, 0, HEADER_H)
+            mainFrame.Size = UDim2.new(0, HUD_W, 0, HEADER_H)
             pilotsLabel.Visible = false
             crashLogLabel.Visible = false
             local lt = mainFrame:FindFirstChild("LogTitle")
@@ -761,7 +685,7 @@ buildGuiContents = function()
             if sb then sb.Visible = false end
             hideBtn.Text = "+"
         else
-            mainFrame.Size = UDim2.new(0, 380, 0, 440)
+            mainFrame.Size = UDim2.new(0, HUD_W, 0, HUD_H)
             pilotsLabel.Visible = true
             crashLogLabel.Visible = true
             local lt = mainFrame:FindFirstChild("LogTitle")
