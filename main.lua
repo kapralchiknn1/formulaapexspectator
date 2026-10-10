@@ -101,14 +101,14 @@ local LocalPlayer = Players.LocalPlayer
 -- Настройки
 ------------------------------------------------------------
 local CONFIG = {
-    REFRESH_INTERVAL = 0.5,        -- как часто обновлять данные пилотов
-    CRASH_SPEED_THRESHOLD = 5,     -- stud/s; ниже этой скорости считаем что пилот стоит
+    REFRESH_INTERVAL = 0.1,        -- как часто обновлять данные пилотов
+    CRASH_SPEED_THRESHOLD = 2,     -- stud/s; ниже этой скорости считаем что пилот стоит
     CRASH_DAMAGE_THRESHOLD = 70,   -- если здоровье машины ниже этого % — считаем её разбитой
     STALLED_AFTER_SECONDS = 25,    -- сколько секунд пилот стоит на месте -> [DNF]
     SHOW_LOCAL_PLAYER = true,      -- показывать и себя тоже
     DEBUG_LOG = false,             -- печатать в консоль найденные машины (для отладки)
     MAX_LOG_ENTRIES = 50,          -- сколько записей об авариях хранить
-    WARMUP_SECONDS = 3,            -- секунд после START, в течение которых статусы не начисляются
+    WARMUP_SECONDS = 1,            -- секунд после START, в течение которых статусы не начисляются
     WEBHOOK_ENABLED = false,       -- включить отправку логов на Discord Webhook
     WEBHOOK_URL = "",              -- вставьте URL вашего Discord webhook сюда
 }
