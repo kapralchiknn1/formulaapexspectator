@@ -19,14 +19,6 @@
 -- не создался ни в одном — пробуем NextInstance ("clone"-метод),
 -- который обходит большинство анти-detector'ов.
 ------------------------------------------------------------
-<<<<<<< HEAD
-local function getParentForGui()
-    local gethuiFn = (type(gethui) == "function") and gethui
-        or (type(getgenv) == "function" and type(getgenv().gethui) == "function" and getgenv().gethui)
-    if gethuiFn then
-        local ok, hui = pcall(gethuiFn)
-        if ok and hui then return hui end
-=======
 local function guiParents()
     local list = {}
     local function tryPush(name, fn)
@@ -34,7 +26,6 @@ local function guiParents()
         if ok and obj and typeof(obj) == "Instance" then
             list[#list + 1] = { name = name, obj = obj }
         end
->>>>>>> master
     end
     tryPush("gethui", function()
         local f = (type(gethui) == "function" and gethui)
@@ -414,17 +405,7 @@ end
 local gui, mainFrame, pilotsLabel, crashLogLabel
 
 local function createGui()
-<<<<<<< HEAD
-    gui = Instance.new("ScreenGui")
-    gui.Name = "ApexSpectatorHUD"
-    gui.ResetOnSpawn = false
-    gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    gui.IgnoreGuiInset = true
-    gui.DisplayOrder = 999999
-    gui.Parent = getParentForGui()
-=======
     gui = createGuiSafe()
->>>>>>> master
 
     mainFrame = Instance.new("Frame")
     mainFrame.Name = "MainFrame"
@@ -541,11 +522,6 @@ end
 ------------------------------------------------------------
 -- Запуск
 ------------------------------------------------------------
-<<<<<<< HEAD
-local okGui, errGui = pcall(createGui)
-if not okGui then
-    warn("[Spectator] Не удалось создать HUD:", errGui)
-=======
 ------------------------------------------------------------
 -- Страж HUD: если через 5 секунд GUI не виден — пересоздаём во всех доступных родителях
 ------------------------------------------------------------
@@ -575,7 +551,6 @@ if not okGui then
     warn("[Spectator] Не удалось создать HUD:", errGui)
 else
     print(("[Spectator] HUD создан через: %s"):format(tostring(createdVia)))
->>>>>>> master
 end
 
 spawn(function()
