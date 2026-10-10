@@ -79,8 +79,11 @@ MIT © 2026 kapralchiknn1
 ## Лига
 Этот проект делался для федерации FMCA - одной из самых больших по Formula Apex. Там же вы сможете поучаствовать в лиге по F1 25/F1 26/ Ссылки ниже
 
-PFC1(F1) - https://t.me/FMCA_PFC1
-PFC2(F2) - https://t.me/FMCA_PFC2
-PFC3(F3) - https://t.me/FMCA_PFC3
-F1 26 - https://t.me/f125pfc
-F1 25 - https://t.me/f2_25_cis
+1.PFC1(F1) - https://t.me/FMCA_PFC1
+2.PFC2(F2) - https://t.me/FMCA_PFC2
+3.PFC3(F3) - https://t.me/FMCA_PFC3
+4.F1 26 - https://t.me/f125pfc
+5.F1 25 - https://t.me/f2_25_cis
+
+## Обратная связь
+Если вы нашли какой то баг, напишите мне в Telegram/Discord:ts_kprl
