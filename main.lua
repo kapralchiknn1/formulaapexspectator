@@ -117,6 +117,7 @@ local CONFIG = {
 ------------------------------------------------------------
 local PilotData = {}      -- [userId] = таблица состояния
 local CrashLog = {}       -- массив событий аварий/DNF
+local monitoring = false  -- мониторинг запускается кнопкой START (не на старте)
 local CarCache = {}       -- [userId] = {model, time}
 local DescendantsCache = nil
 local DescendantsCacheTime = 0
@@ -321,7 +322,14 @@ end
 ------------------------------------------------------------
 -- Основной цикл наблюдения
 ------------------------------------------------------------
+local function resetMonitoring()
+    -- Полная очистка: при старте/остановке мониторинга никто не помечается DNF "наследно"
+    for uid in pairs(PilotData) do PilotData[uid] = nil end
+    for uid in pairs(CarCache) do CarCache[uid] = nil end
+end
+
 local function updatePilotData()
+    if not monitoring then return end
     local seen = {}
 
     for _, plr in ipairs(Players:GetPlayers()) do
@@ -404,6 +412,7 @@ end
 ------------------------------------------------------------
 local gui, mainFrame, pilotsLabel, crashLogLabel, hideBtn, collapsed = nil, nil, nil, nil, nil, false
 local pinBtn, clearBtn, pinned = nil, nil, false
+local startBtn = nil
 local titleLbl = nil
 
 -- Срез списка подключений у объекта (совместимость со старыми движками)
@@ -495,8 +504,8 @@ local buildGuiContents
 buildGuiContents = function()
     mainFrame = Instance.new("Frame")
     mainFrame.Name = "MainFrame"
-    mainFrame.Size = UDim2.new(0, 380, 0, 420)
-    mainFrame.Position = UDim2.new(0, 20, 0.5, -210)
+    mainFrame.Size = UDim2.new(0, 380, 0, 440)
+    mainFrame.Position = UDim2.new(0, 20, 0.5, -220)
     mainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
     mainFrame.BackgroundTransparency = 0.15
     mainFrame.BorderSizePixel = 0
@@ -591,15 +600,19 @@ buildGuiContents = function()
             if lt then lt.Visible = false end
             local cb = mainFrame:FindFirstChild("ClearLog")
             if cb then cb.Visible = false end
+            local sb = mainFrame:FindFirstChild("StartStop")
+            if sb then sb.Visible = false end
             hideBtn.Text = "+"
         else
-            mainFrame.Size = UDim2.new(0, 380, 0, 420)
+            mainFrame.Size = UDim2.new(0, 380, 0, 440)
             pilotsLabel.Visible = true
             crashLogLabel.Visible = true
             local lt = mainFrame:FindFirstChild("LogTitle")
             if lt then lt.Visible = true end
             local cb = mainFrame:FindFirstChild("ClearLog")
             if cb then cb.Visible = true end
+            local sb = mainFrame:FindFirstChild("StartStop")
+            if sb then sb.Visible = true end
             hideBtn.Text = "-"
         end
     end)
@@ -615,14 +628,60 @@ buildGuiContents = function()
     pilotsLabel.TextYAlignment = Enum.TextYAlignment.Top
     pilotsLabel.TextColor3 = Color3.fromRGB(230, 230, 230)
     pilotsLabel.TextWrapped = true
-    pilotsLabel.Text = "Ожидание данных..."
     enableRich(pilotsLabel)
     pilotsLabel.Parent = mainFrame
+
+    -- Кнопка START/STOP: мониторинг не стартует сам, иначе на старте заезда
+    -- все пилоты могут показаться DNF (стоят в боксах / ещё не заспавнились).
+    local function updateStartBtn()
+        if not startBtn then return end
+        if monitoring then
+            startBtn.Text = "STOP"
+            startBtn.BackgroundColor3 = Color3.fromRGB(70, 40, 40)
+            startBtn.TextColor3 = Color3.fromRGB(255, 160, 160)
+        else
+            startBtn.Text = "START"
+            startBtn.BackgroundColor3 = Color3.fromRGB(35, 70, 45)
+            startBtn.TextColor3 = Color3.fromRGB(150, 255, 170)
+        end
+    end
+
+    startBtn = Instance.new("TextButton")
+    startBtn.Name = "StartStop"
+    startBtn.Size = UDim2.new(1, -20, 0, 30)
+    startBtn.Position = UDim2.new(0, 10, 0, 270)
+    startBtn.BackgroundColor3 = Color3.fromRGB(35, 70, 45)
+    startBtn.TextColor3 = Color3.fromRGB(150, 255, 170)
+    startBtn.Font = Enum.Font.GothamBold
+    startBtn.TextSize = 15
+    startBtn.Text = "START MONITORING"
+    startBtn.AutoButtonColor = true
+    startBtn.Parent = mainFrame
+    Instance.new("UICorner", startBtn).CornerRadius = UDim.new(0, 6)
+
+    startBtn.MouseButton1Click:Connect(function()
+        monitoring = not monitoring
+        resetMonitoring()
+        updateStartBtn()
+        if monitoring then
+            pcall(function()
+                startBtn.Text = "STOP MONITORING"
+                pilotsLabel.Text = "Мониторинг запущен. Ожидаем данные..."
+            end)
+            print("[Spectator] Мониторинг ЗАПУЩЕН кнопкой. Статусы DNF будут считаться с нуля.")
+        else
+            pcall(function()
+                startBtn.Text = "START MONITORING"
+                pilotsLabel.Text = "Мониторинг остановлен."
+            end)
+            print("[Spectator] Мониторинг остановлен.")
+        end
+    end)
 
     local logTitle = Instance.new("TextLabel")
     logTitle.Name = "LogTitle"
     logTitle.Size = UDim2.new(1, -20, 0, 24)
-    logTitle.Position = UDim2.new(0, 10, 0, 280)
+    logTitle.Position = UDim2.new(0, 10, 0, 310)
     logTitle.BackgroundTransparency = 1
     logTitle.Font = Enum.Font.GothamBold
     logTitle.TextSize = 15
@@ -635,7 +694,7 @@ buildGuiContents = function()
     clearBtn = Instance.new("TextButton")
     clearBtn.Name = "ClearLog"
     clearBtn.Size = UDim2.new(0, 74, 0, 22)
-    clearBtn.Position = UDim2.new(1, -86, 0, 281)
+    clearBtn.Position = UDim2.new(1, -86, 0, 311)
     clearBtn.BackgroundColor3 = Color3.fromRGB(60, 40, 40)
     clearBtn.TextColor3 = Color3.fromRGB(255, 200, 200)
     clearBtn.Font = Enum.Font.GothamBold
@@ -653,8 +712,8 @@ buildGuiContents = function()
 
     crashLogLabel = Instance.new("TextLabel")
     crashLogLabel.Name = "CrashLog"
-    crashLogLabel.Size = UDim2.new(1, -20, 0, 110)
-    crashLogLabel.Position = UDim2.new(0, 10, 0, 305)
+    crashLogLabel.Size = UDim2.new(1, -20, 0, 95)
+    crashLogLabel.Position = UDim2.new(0, 10, 0, 336)
     crashLogLabel.BackgroundTransparency = 1
     crashLogLabel.Font = Enum.Font.Code
     crashLogLabel.TextSize = 13
@@ -668,6 +727,19 @@ end
 
 local function refreshGui()
     if not pilotsLabel then return end
+
+    if not monitoring then
+        setRich(pilotsLabel,
+            '<font color="#ffcc00">Нажмите START MONITORING,</font>\n<font color="#ffcc00">чтобы начать наблюдение.</font>',
+            "Нажмите START MONITORING,\nчтобы начать наблюдение.")
+        local logLines = {}
+        for i = 1, math.min(6, #CrashLog) do
+            local ev = CrashLog[i]
+            table.insert(logLines, ("%s | %s [%s]"):format(formatTime(ev.Time), ev.Name, ev.Type or "CRASH"))
+        end
+        crashLogLabel.Text = (#logLines > 0) and table.concat(logLines, "\n") or ""
+        return
+    end
 
     local htmlLines = { ("Pilots online: %d"):format(#Players:GetPlayers()), "" }
     local plainLines = { ("Pilots online: %d"):format(#Players:GetPlayers()), "" }
